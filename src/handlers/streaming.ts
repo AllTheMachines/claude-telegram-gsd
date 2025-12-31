@@ -83,6 +83,7 @@ export class StreamingState {
   textMessages = new Map<number, Message>(); // segment_id -> telegram message
   toolMessages: Message[] = []; // ephemeral tool status messages
   lastEditTimes = new Map<number, number>(); // segment_id -> last edit time
+  lastContent = new Map<number, string>(); // segment_id -> last sent content
 }
 
 /**
@@ -113,11 +114,13 @@ export function createStatusCallback(ctx: Context, state: StreamingState): Statu
           try {
             const msg = await ctx.reply(formatted, { parse_mode: "HTML" });
             state.textMessages.set(segmentId, msg);
+            state.lastContent.set(segmentId, formatted);
           } catch (htmlError) {
             // HTML parse failed, fall back to plain text
             console.debug("HTML reply failed, using plain text:", htmlError);
             const msg = await ctx.reply(formatted);
             state.textMessages.set(segmentId, msg);
+            state.lastContent.set(segmentId, formatted);
           }
           state.lastEditTimes.set(segmentId, now);
         } else if (now - lastEdit > STREAMING_THROTTLE_MS) {
@@ -128,14 +131,20 @@ export function createStatusCallback(ctx: Context, state: StreamingState): Statu
               ? content.slice(0, TELEGRAM_SAFE_LIMIT) + "..."
               : content;
           const formatted = convertMarkdownToHtml(display);
+          // Skip if content unchanged
+          if (formatted === state.lastContent.get(segmentId)) {
+            return;
+          }
           try {
             await ctx.api.editMessageText(msg.chat.id, msg.message_id, formatted, {
               parse_mode: "HTML",
             });
+            state.lastContent.set(segmentId, formatted);
           } catch (htmlError) {
             console.debug("HTML edit failed, trying plain text:", htmlError);
             try {
               await ctx.api.editMessageText(msg.chat.id, msg.message_id, formatted);
+              state.lastContent.set(segmentId, formatted);
             } catch (editError) {
               console.debug("Edit message failed:", editError);
             }
@@ -146,6 +155,11 @@ export function createStatusCallback(ctx: Context, state: StreamingState): Statu
         if (state.textMessages.has(segmentId) && content) {
           const msg = state.textMessages.get(segmentId)!;
           const formatted = convertMarkdownToHtml(content);
+
+          // Skip if content unchanged
+          if (formatted === state.lastContent.get(segmentId)) {
+            return;
+          }
 
           if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
             try {
