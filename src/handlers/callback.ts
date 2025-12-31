@@ -5,6 +5,7 @@
  */
 
 import type { Context } from "grammy";
+import { unlinkSync } from "fs";
 import { session } from "../session";
 import { ALLOWED_USERS, INTENT_BLOCK_THRESHOLD } from "../config";
 import { isAuthorized, classifyIntent } from "../security";
@@ -84,8 +85,7 @@ export async function handleCallback(ctx: Context): Promise<void> {
 
   // 7. Delete request file
   try {
-    const fs = require("fs");
-    fs.unlinkSync(requestFile);
+    unlinkSync(requestFile);
   } catch {
     // Ignore
   }

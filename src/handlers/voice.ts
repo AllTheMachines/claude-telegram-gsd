@@ -3,6 +3,7 @@
  */
 
 import type { Context } from "grammy";
+import { unlinkSync } from "fs";
 import { session } from "../session";
 import { ALLOWED_USERS, INTENT_BLOCK_THRESHOLD, TEMP_DIR, TRANSCRIPTION_AVAILABLE } from "../config";
 import { isAuthorized, rateLimiter, classifyIntent } from "../security";
@@ -117,9 +118,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
     // Clean up voice file
     if (voicePath) {
       try {
-        await Bun.write(voicePath, ""); // Truncate
-        const fs = require("fs");
-        fs.unlinkSync(voicePath);
+        unlinkSync(voicePath);
       } catch {
         // Ignore cleanup errors
       }

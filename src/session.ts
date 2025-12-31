@@ -6,6 +6,7 @@
  */
 
 import { query, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { readFileSync } from "fs";
 import type { StatusCallback, SessionData, TokenUsage } from "./types";
 import type { Context } from "grammy";
 import {
@@ -373,7 +374,7 @@ class ClaudeSession {
         return [false, "No saved session found"];
       }
 
-      const text = require("fs").readFileSync(SESSION_FILE, "utf-8");
+      const text = readFileSync(SESSION_FILE, "utf-8");
       const data: SessionData = JSON.parse(text);
 
       if (!data.session_id) {
