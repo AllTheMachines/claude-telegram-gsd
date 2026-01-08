@@ -81,7 +81,9 @@ export async function handleCallback(ctx: Context): Promise<void> {
   }
 
   // 6. Answer the callback
-  await ctx.answerCallbackQuery({ text: `Selected: ${selectedOption.slice(0, 50)}` });
+  await ctx.answerCallbackQuery({
+    text: `Selected: ${selectedOption.slice(0, 50)}`,
+  });
 
   // 7. Delete request file
   try {

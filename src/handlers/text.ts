@@ -6,7 +6,12 @@ import type { Context } from "grammy";
 import { session } from "../session";
 import { ALLOWED_USERS } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
-import { auditLog, auditLogRateLimit, checkInterrupt, startTypingIndicator } from "../utils";
+import {
+  auditLog,
+  auditLogRateLimit,
+  checkInterrupt,
+  startTypingIndicator,
+} from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
 
 /**
@@ -38,7 +43,9 @@ export async function handleText(ctx: Context): Promise<void> {
   const [allowed, retryAfter] = rateLimiter.check(userId);
   if (!allowed) {
     await auditLogRateLimit(userId, username, retryAfter!);
-    await ctx.reply(`⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`);
+    await ctx.reply(
+      `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+    );
     return;
   }
 

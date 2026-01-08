@@ -129,7 +129,9 @@ export async function handleStatus(ctx: Context): Promise<void> {
 
   // Last activity
   if (session.lastActivity) {
-    const ago = Math.floor((Date.now() - session.lastActivity.getTime()) / 1000);
+    const ago = Math.floor(
+      (Date.now() - session.lastActivity.getTime()) / 1000
+    );
     lines.push(`\n⏱️ Last activity: ${ago}s ago`);
   }
 
@@ -142,7 +144,9 @@ export async function handleStatus(ctx: Context): Promise<void> {
       `   Output: ${usage.output_tokens?.toLocaleString() || "?"} tokens`
     );
     if (usage.cache_read_input_tokens) {
-      lines.push(`   Cache read: ${usage.cache_read_input_tokens.toLocaleString()}`);
+      lines.push(
+        `   Cache read: ${usage.cache_read_input_tokens.toLocaleString()}`
+      );
     }
   }
 

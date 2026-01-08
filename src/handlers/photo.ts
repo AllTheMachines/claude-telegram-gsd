@@ -125,7 +125,9 @@ export async function handlePhoto(ctx: Context): Promise<void> {
     const [allowed, retryAfter] = rateLimiter.check(userId);
     if (!allowed) {
       await auditLogRateLimit(userId, username, retryAfter!);
-      await ctx.reply(`⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`);
+      await ctx.reply(
+        `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+      );
       return;
     }
 
@@ -141,7 +143,11 @@ export async function handlePhoto(ctx: Context): Promise<void> {
     console.error("Failed to download photo:", error);
     if (statusMsg) {
       try {
-        await ctx.api.editMessageText(statusMsg.chat.id, statusMsg.message_id, "❌ Failed to download photo.");
+        await ctx.api.editMessageText(
+          statusMsg.chat.id,
+          statusMsg.message_id,
+          "❌ Failed to download photo."
+        );
       } catch (editError) {
         console.debug("Failed to edit status message:", editError);
         await ctx.reply("❌ Failed to download photo.");
@@ -154,7 +160,14 @@ export async function handlePhoto(ctx: Context): Promise<void> {
 
   // 4. Single photo - process immediately
   if (!mediaGroupId && statusMsg) {
-    await processPhotos(ctx, [photoPath], ctx.message?.caption, userId, username, chatId);
+    await processPhotos(
+      ctx,
+      [photoPath],
+      ctx.message?.caption,
+      userId,
+      username,
+      chatId
+    );
 
     // Clean up status message
     try {
@@ -168,5 +181,12 @@ export async function handlePhoto(ctx: Context): Promise<void> {
   // 5. Media group - buffer with timeout
   if (!mediaGroupId) return; // TypeScript guard
 
-  await photoBuffer.addToGroup(mediaGroupId, photoPath, ctx, userId, username, processPhotos);
+  await photoBuffer.addToGroup(
+    mediaGroupId,
+    photoPath,
+    ctx,
+    userId,
+    username,
+    processPhotos
+  );
 }

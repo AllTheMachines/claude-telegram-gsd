@@ -80,7 +80,10 @@ async function downloadDocument(ctx: Context): Promise<string> {
 /**
  * Extract text from a document.
  */
-async function extractText(filePath: string, mimeType?: string): Promise<string> {
+async function extractText(
+  filePath: string,
+  mimeType?: string
+): Promise<string> {
   const fileName = filePath.split("/").pop() || "";
   const extension = "." + (fileName.split(".").pop() || "").toLowerCase();
 
@@ -128,7 +131,10 @@ function getArchiveExtension(fileName: string): string {
 /**
  * Extract an archive to a temp directory.
  */
-async function extractArchive(archivePath: string, fileName: string): Promise<string> {
+async function extractArchive(
+  archivePath: string,
+  fileName: string
+): Promise<string> {
   const ext = getArchiveExtension(fileName);
   const extractDir = `${TEMP_DIR}/archive_${Date.now()}`;
   await Bun.$`mkdir -p ${extractDir}`;
@@ -148,7 +154,9 @@ async function extractArchive(archivePath: string, fileName: string): Promise<st
  * Build a file tree from a directory.
  */
 async function buildFileTree(dir: string): Promise<string[]> {
-  const entries = await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: dir, dot: false }));
+  const entries = await Array.fromAsync(
+    new Bun.Glob("**/*").scan({ cwd: dir, dot: false })
+  );
   entries.sort();
   return entries.slice(0, 100); // Limit to 100 files
 }
@@ -158,7 +166,10 @@ async function buildFileTree(dir: string): Promise<string[]> {
  */
 async function extractArchiveContent(
   extractDir: string
-): Promise<{ tree: string[]; contents: Array<{ name: string; content: string }> }> {
+): Promise<{
+  tree: string[];
+  contents: Array<{ name: string; content: string }>;
+}> {
   const tree = await buildFileTree(extractDir);
   const contents: Array<{ name: string; content: string }> = [];
   let totalSize = 0;
@@ -209,7 +220,9 @@ async function processArchive(
   const typing = startTypingIndicator(ctx);
 
   // Show extraction progress
-  const statusMsg = await ctx.reply(`📦 Extracting <b>${fileName}</b>...`, { parse_mode: "HTML" });
+  const statusMsg = await ctx.reply(`📦 Extracting <b>${fileName}</b>...`, {
+    parse_mode: "HTML",
+  });
 
   try {
     // Extract archive
@@ -250,7 +263,13 @@ async function processArchive(
       ctx
     );
 
-    await auditLog(userId, username, "ARCHIVE", `[${fileName}] ${caption || ""}`, response);
+    await auditLog(
+      userId,
+      username,
+      "ARCHIVE",
+      `[${fileName}] ${caption || ""}`,
+      response
+    );
 
     // Cleanup
     await Bun.$`rm -rf ${extractDir}`.quiet();
@@ -269,7 +288,9 @@ async function processArchive(
     } catch {
       // Ignore
     }
-    await ctx.reply(`❌ Failed to process archive: ${String(error).slice(0, 100)}`);
+    await ctx.reply(
+      `❌ Failed to process archive: ${String(error).slice(0, 100)}`
+    );
   } finally {
     stopProcessing();
     typing.stop();
@@ -323,7 +344,13 @@ async function processDocuments(
       ctx
     );
 
-    await auditLog(userId, username, "DOCUMENT", `[${documents.length} docs] ${caption || ""}`, response);
+    await auditLog(
+      userId,
+      username,
+      "DOCUMENT",
+      `[${documents.length} docs] ${caption || ""}`,
+      response
+    );
   } catch (error) {
     await handleProcessingError(ctx, error, state.toolMessages);
   } finally {
@@ -394,13 +421,16 @@ export async function handleDocument(ctx: Context): Promise<void> {
   const fileName = doc.file_name || "";
   const extension = "." + (fileName.split(".").pop() || "").toLowerCase();
   const isPdf = doc.mime_type === "application/pdf" || extension === ".pdf";
-  const isText = TEXT_EXTENSIONS.includes(extension) || doc.mime_type?.startsWith("text/");
+  const isText =
+    TEXT_EXTENSIONS.includes(extension) || doc.mime_type?.startsWith("text/");
   const isArchiveFile = isArchive(fileName);
 
   if (!isPdf && !isText && !isArchiveFile) {
     await ctx.reply(
       `❌ Unsupported file type: ${extension || doc.mime_type}\n\n` +
-        `Supported: PDF, archives (${ARCHIVE_EXTENSIONS.join(", ")}), ${TEXT_EXTENSIONS.join(", ")}`
+        `Supported: PDF, archives (${ARCHIVE_EXTENSIONS.join(
+          ", "
+        )}), ${TEXT_EXTENSIONS.join(", ")}`
     );
     return;
   }
@@ -421,11 +451,21 @@ export async function handleDocument(ctx: Context): Promise<void> {
     const [allowed, retryAfter] = rateLimiter.check(userId);
     if (!allowed) {
       await auditLogRateLimit(userId, username, retryAfter!);
-      await ctx.reply(`⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`);
+      await ctx.reply(
+        `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+      );
       return;
     }
 
-    await processArchive(ctx, docPath, fileName, ctx.message?.caption, userId, username, chatId);
+    await processArchive(
+      ctx,
+      docPath,
+      fileName,
+      ctx.message?.caption,
+      userId,
+      username,
+      chatId
+    );
     return;
   }
 
@@ -436,7 +476,9 @@ export async function handleDocument(ctx: Context): Promise<void> {
     const [allowed, retryAfter] = rateLimiter.check(userId);
     if (!allowed) {
       await auditLogRateLimit(userId, username, retryAfter!);
-      await ctx.reply(`⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`);
+      await ctx.reply(
+        `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+      );
       return;
     }
 
@@ -452,11 +494,20 @@ export async function handleDocument(ctx: Context): Promise<void> {
       );
     } catch (error) {
       console.error("Failed to extract document:", error);
-      await ctx.reply(`❌ Failed to process document: ${String(error).slice(0, 100)}`);
+      await ctx.reply(
+        `❌ Failed to process document: ${String(error).slice(0, 100)}`
+      );
     }
     return;
   }
 
   // 7. Media group - buffer with timeout
-  await documentBuffer.addToGroup(mediaGroupId, docPath, ctx, userId, username, processDocumentPaths);
+  await documentBuffer.addToGroup(
+    mediaGroupId,
+    docPath,
+    ctx,
+    userId,
+    username,
+    processDocumentPaths
+  );
 }

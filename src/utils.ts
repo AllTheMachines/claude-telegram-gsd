@@ -35,7 +35,10 @@ async function writeAuditLog(event: AuditEvent): Promise<void> {
       const lines = ["\n" + "=".repeat(60)];
       for (const [key, value] of Object.entries(event)) {
         let displayValue = value;
-        if ((key === "content" || key === "response") && String(value).length > 500) {
+        if (
+          (key === "content" || key === "response") &&
+          String(value).length > 500
+        ) {
           displayValue = String(value).slice(0, 500) + "...";
         }
         lines.push(`${key}: ${displayValue}`);
@@ -144,7 +147,9 @@ export async function auditLogRateLimit(
 
 // ============== Voice Transcription ==============
 
-export async function transcribeVoice(filePath: string): Promise<string | null> {
+export async function transcribeVoice(
+  filePath: string
+): Promise<string | null> {
   if (!openaiClient) {
     console.warn("OpenAI client not available for transcription");
     return null;

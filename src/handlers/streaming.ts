@@ -19,7 +19,10 @@ import {
 /**
  * Create inline keyboard for ask_user options.
  */
-export function createAskUserKeyboard(requestId: string, options: string[]): InlineKeyboard {
+export function createAskUserKeyboard(
+  requestId: string,
+  options: string[]
+): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   for (let idx = 0; idx < options.length; idx++) {
     const option = options[idx]!;
@@ -89,13 +92,19 @@ export class StreamingState {
 /**
  * Create a status callback for streaming updates.
  */
-export function createStatusCallback(ctx: Context, state: StreamingState): StatusCallback {
+export function createStatusCallback(
+  ctx: Context,
+  state: StreamingState
+): StatusCallback {
   return async (statusType: string, content: string, segmentId?: number) => {
     try {
       if (statusType === "thinking") {
         // Show thinking inline, compact (first 500 chars)
-        const preview = content.length > 500 ? content.slice(0, 500) + "..." : content;
-        const thinkingMsg = await ctx.reply(`🧠 <i>${preview}</i>`, { parse_mode: "HTML" });
+        const preview =
+          content.length > 500 ? content.slice(0, 500) + "..." : content;
+        const thinkingMsg = await ctx.reply(`🧠 <i>${preview}</i>`, {
+          parse_mode: "HTML",
+        });
         state.toolMessages.push(thinkingMsg);
       } else if (statusType === "tool") {
         const toolMsg = await ctx.reply(content, { parse_mode: "HTML" });
@@ -136,14 +145,23 @@ export function createStatusCallback(ctx: Context, state: StreamingState): Statu
             return;
           }
           try {
-            await ctx.api.editMessageText(msg.chat.id, msg.message_id, formatted, {
-              parse_mode: "HTML",
-            });
+            await ctx.api.editMessageText(
+              msg.chat.id,
+              msg.message_id,
+              formatted,
+              {
+                parse_mode: "HTML",
+              }
+            );
             state.lastContent.set(segmentId, formatted);
           } catch (htmlError) {
             console.debug("HTML edit failed, trying plain text:", htmlError);
             try {
-              await ctx.api.editMessageText(msg.chat.id, msg.message_id, formatted);
+              await ctx.api.editMessageText(
+                msg.chat.id,
+                msg.message_id,
+                formatted
+              );
               state.lastContent.set(segmentId, formatted);
             } catch (editError) {
               console.debug("Edit message failed:", editError);
@@ -163,9 +181,14 @@ export function createStatusCallback(ctx: Context, state: StreamingState): Statu
 
           if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
             try {
-              await ctx.api.editMessageText(msg.chat.id, msg.message_id, formatted, {
-                parse_mode: "HTML",
-              });
+              await ctx.api.editMessageText(
+                msg.chat.id,
+                msg.message_id,
+                formatted,
+                {
+                  parse_mode: "HTML",
+                }
+              );
             } catch (error) {
               console.debug("Failed to edit final message:", error);
             }
@@ -181,7 +204,10 @@ export function createStatusCallback(ctx: Context, state: StreamingState): Statu
               try {
                 await ctx.reply(chunk, { parse_mode: "HTML" });
               } catch (htmlError) {
-                console.debug("HTML chunk failed, using plain text:", htmlError);
+                console.debug(
+                  "HTML chunk failed, using plain text:",
+                  htmlError
+                );
                 await ctx.reply(chunk);
               }
             }

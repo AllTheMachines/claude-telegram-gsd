@@ -63,7 +63,9 @@ export function createMediaGroupBuffer(config: MediaGroupConfig) {
 
     if (!userId || !chatId) return;
 
-    console.log(`Processing ${group.items.length} ${config.itemLabelPlural} from @${username}`);
+    console.log(
+      `Processing ${group.items.length} ${config.itemLabelPlural} from @${username}`
+    );
 
     // Update status message
     if (group.statusMsg) {
@@ -78,12 +80,22 @@ export function createMediaGroupBuffer(config: MediaGroupConfig) {
       }
     }
 
-    await processCallback(group.ctx, group.items, group.caption, userId, username, chatId);
+    await processCallback(
+      group.ctx,
+      group.items,
+      group.caption,
+      userId,
+      username,
+      chatId
+    );
 
     // Delete status message
     if (group.statusMsg) {
       try {
-        await group.ctx.api.deleteMessage(group.statusMsg.chat.id, group.statusMsg.message_id);
+        await group.ctx.api.deleteMessage(
+          group.statusMsg.chat.id,
+          group.statusMsg.message_id
+        );
       } catch (error) {
         console.debug("Failed to delete status message:", error);
       }
@@ -108,20 +120,27 @@ export function createMediaGroupBuffer(config: MediaGroupConfig) {
       const [allowed, retryAfter] = rateLimiter.check(userId);
       if (!allowed) {
         await auditLogRateLimit(userId, username, retryAfter!);
-        await ctx.reply(`⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`);
+        await ctx.reply(
+          `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+        );
         return false;
       }
 
       // Create new group
       console.log(`Receiving ${config.itemLabel} album from @${username}`);
-      const statusMsg = await ctx.reply(`${config.emoji} Receiving ${config.itemLabelPlural}...`);
+      const statusMsg = await ctx.reply(
+        `${config.emoji} Receiving ${config.itemLabelPlural}...`
+      );
 
       pendingGroups.set(mediaGroupId, {
         items: [itemPath],
         ctx,
         caption: ctx.message?.caption,
         statusMsg,
-        timeout: setTimeout(() => processGroup(mediaGroupId, processCallback), MEDIA_GROUP_TIMEOUT),
+        timeout: setTimeout(
+          () => processGroup(mediaGroupId, processCallback),
+          MEDIA_GROUP_TIMEOUT
+        ),
       });
     } else {
       // Add to existing group
@@ -135,7 +154,10 @@ export function createMediaGroupBuffer(config: MediaGroupConfig) {
 
       // Reset timeout
       clearTimeout(group.timeout);
-      group.timeout = setTimeout(() => processGroup(mediaGroupId, processCallback), MEDIA_GROUP_TIMEOUT);
+      group.timeout = setTimeout(
+        () => processGroup(mediaGroupId, processCallback),
+        MEDIA_GROUP_TIMEOUT
+      );
     }
 
     return true;

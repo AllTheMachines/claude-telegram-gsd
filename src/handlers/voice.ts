@@ -36,7 +36,9 @@ export async function handleVoice(ctx: Context): Promise<void> {
 
   // 2. Check if transcription is available
   if (!TRANSCRIPTION_AVAILABLE) {
-    await ctx.reply("Voice transcription is not configured. Set OPENAI_API_KEY in .env");
+    await ctx.reply(
+      "Voice transcription is not configured. Set OPENAI_API_KEY in .env"
+    );
     return;
   }
 
@@ -44,7 +46,9 @@ export async function handleVoice(ctx: Context): Promise<void> {
   const [allowed, retryAfter] = rateLimiter.check(userId);
   if (!allowed) {
     await auditLogRateLimit(userId, username, retryAfter!);
-    await ctx.reply(`⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`);
+    await ctx.reply(
+      `⏳ Rate limited. Please wait ${retryAfter!.toFixed(1)} seconds.`
+    );
     return;
   }
 
@@ -74,13 +78,21 @@ export async function handleVoice(ctx: Context): Promise<void> {
 
     const transcript = await transcribeVoice(voicePath);
     if (!transcript) {
-      await ctx.api.editMessageText(chatId, statusMsg.message_id, "❌ Transcription failed.");
+      await ctx.api.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        "❌ Transcription failed."
+      );
       stopProcessing();
       return;
     }
 
     // 8. Show transcript
-    await ctx.api.editMessageText(chatId, statusMsg.message_id, `🎤 "${transcript}"`);
+    await ctx.api.editMessageText(
+      chatId,
+      statusMsg.message_id,
+      `🎤 "${transcript}"`
+    );
 
     // 9. Create streaming state and callback
     const state = new StreamingState();

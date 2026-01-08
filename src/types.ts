@@ -34,9 +34,7 @@ export interface TokenUsage {
 }
 
 // MCP server configuration types
-export type McpServerConfig =
-  | McpStdioConfig
-  | McpHttpConfig;
+export type McpServerConfig = McpStdioConfig | McpHttpConfig;
 
 export interface McpStdioConfig {
   command: string;

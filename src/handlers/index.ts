@@ -2,7 +2,14 @@
  * Handler exports for Claude Telegram Bot.
  */
 
-export { handleStart, handleNew, handleStop, handleStatus, handleResume, handleRestart } from "./commands";
+export {
+  handleStart,
+  handleNew,
+  handleStop,
+  handleStatus,
+  handleResume,
+  handleRestart,
+} from "./commands";
 export { handleText } from "./text";
 export { handleVoice } from "./voice";
 export { handlePhoto } from "./photo";

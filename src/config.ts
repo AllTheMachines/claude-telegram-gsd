@@ -34,7 +34,9 @@ process.env.PATH = pathParts.join(":");
 // ============== Core Configuration ==============
 
 export const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-export const ALLOWED_USERS: number[] = (process.env.TELEGRAM_ALLOWED_USERS || "")
+export const ALLOWED_USERS: number[] = (
+  process.env.TELEGRAM_ALLOWED_USERS || ""
+)
   .split(",")
   .filter((x) => x.trim())
   .map((x) => parseInt(x.trim(), 10))
@@ -71,7 +73,9 @@ try {
   const mcpModule = await import(mcpConfigPath).catch(() => null);
   if (mcpModule?.MCP_SERVERS) {
     MCP_SERVERS = mcpModule.MCP_SERVERS;
-    console.log(`Loaded ${Object.keys(MCP_SERVERS).length} MCP servers from mcp-config.ts`);
+    console.log(
+      `Loaded ${Object.keys(MCP_SERVERS).length} MCP servers from mcp-config.ts`
+    );
   }
 } catch {
   console.log("No mcp-config.ts found - running without MCPs");
@@ -92,7 +96,10 @@ const defaultAllowedPaths = [
 
 const allowedPathsStr = process.env.ALLOWED_PATHS || "";
 export const ALLOWED_PATHS: string[] = allowedPathsStr
-  ? allowedPathsStr.split(",").map((p) => p.trim()).filter(Boolean)
+  ? allowedPathsStr
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean)
   : defaultAllowedPaths;
 
 // Build safety prompt dynamically from ALLOWED_PATHS
@@ -157,11 +164,17 @@ export const TRANSCRIPTION_AVAILABLE = !!OPENAI_API_KEY;
 
 // ============== Thinking Keywords ==============
 
-const thinkingKeywordsStr = process.env.THINKING_KEYWORDS || "think,pensa,ragiona";
-const thinkingDeepKeywordsStr = process.env.THINKING_DEEP_KEYWORDS || "ultrathink,think hard,pensa bene";
+const thinkingKeywordsStr =
+  process.env.THINKING_KEYWORDS || "think,pensa,ragiona";
+const thinkingDeepKeywordsStr =
+  process.env.THINKING_DEEP_KEYWORDS || "ultrathink,think hard,pensa bene";
 
-export const THINKING_KEYWORDS = thinkingKeywordsStr.split(",").map((k) => k.trim().toLowerCase());
-export const THINKING_DEEP_KEYWORDS = thinkingDeepKeywordsStr.split(",").map((k) => k.trim().toLowerCase());
+export const THINKING_KEYWORDS = thinkingKeywordsStr
+  .split(",")
+  .map((k) => k.trim().toLowerCase());
+export const THINKING_DEEP_KEYWORDS = thinkingDeepKeywordsStr
+  .split(",")
+  .map((k) => k.trim().toLowerCase());
 
 // ============== Media Group Settings ==============
 
@@ -176,14 +189,23 @@ export const BUTTON_LABEL_MAX_LENGTH = 30; // Max chars for inline button labels
 
 // ============== Audit Logging ==============
 
-export const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || "/tmp/claude-telegram-audit.log";
-export const AUDIT_LOG_JSON = (process.env.AUDIT_LOG_JSON || "false").toLowerCase() === "true";
+export const AUDIT_LOG_PATH =
+  process.env.AUDIT_LOG_PATH || "/tmp/claude-telegram-audit.log";
+export const AUDIT_LOG_JSON =
+  (process.env.AUDIT_LOG_JSON || "false").toLowerCase() === "true";
 
 // ============== Rate Limiting ==============
 
-export const RATE_LIMIT_ENABLED = (process.env.RATE_LIMIT_ENABLED || "true").toLowerCase() === "true";
-export const RATE_LIMIT_REQUESTS = parseInt(process.env.RATE_LIMIT_REQUESTS || "20", 10);
-export const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW || "60", 10);
+export const RATE_LIMIT_ENABLED =
+  (process.env.RATE_LIMIT_ENABLED || "true").toLowerCase() === "true";
+export const RATE_LIMIT_REQUESTS = parseInt(
+  process.env.RATE_LIMIT_REQUESTS || "20",
+  10
+);
+export const RATE_LIMIT_WINDOW = parseInt(
+  process.env.RATE_LIMIT_WINDOW || "60",
+  10
+);
 
 // ============== File Paths ==============
 
@@ -204,8 +226,12 @@ if (!TELEGRAM_TOKEN) {
 }
 
 if (ALLOWED_USERS.length === 0) {
-  console.error("ERROR: TELEGRAM_ALLOWED_USERS environment variable is required");
+  console.error(
+    "ERROR: TELEGRAM_ALLOWED_USERS environment variable is required"
+  );
   process.exit(1);
 }
 
-console.log(`Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}`);
+console.log(
+  `Config loaded: ${ALLOWED_USERS.length} allowed users, working dir: ${WORKING_DIR}`
+);
