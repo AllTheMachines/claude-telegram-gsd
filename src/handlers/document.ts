@@ -250,6 +250,14 @@ async function processArchive(
       ? `Archive: ${fileName}\n\nFile tree (${tree.length} files):\n${treeStr}\n\nExtracted contents:\n${contentsStr}\n\n---\n\n${caption}`
       : `Please analyze this archive (${fileName}):\n\nFile tree (${tree.length} files):\n${treeStr}\n\nExtracted contents:\n${contentsStr}`;
 
+    // Set conversation title (if new session)
+    if (!session.isActive) {
+      const rawTitle = caption || `[Archivio: ${fileName}]`;
+      const title =
+        rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
+      session.conversationTitle = title;
+    }
+
     // Create streaming state
     const state = new StreamingState();
     const statusCallback = createStatusCallback(ctx, state);
@@ -325,6 +333,15 @@ async function processDocuments(
     prompt = caption
       ? `${documents.length} Documents:\n\n${docList}\n\n---\n\n${caption}`
       : `Please analyze these ${documents.length} documents:\n\n${docList}`;
+  }
+
+  // Set conversation title (if new session)
+  if (!session.isActive) {
+    const docName = documents[0]?.name || "[Documento]";
+    const rawTitle = caption || `[Documento: ${docName}]`;
+    const title =
+      rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
+    session.conversationTitle = title;
   }
 
   // Start typing

@@ -94,11 +94,18 @@ export async function handleVoice(ctx: Context): Promise<void> {
       `🎤 "${transcript}"`
     );
 
-    // 9. Create streaming state and callback
+    // 9. Set conversation title from transcript (if new session)
+    if (!session.isActive) {
+      const title =
+        transcript.length > 50 ? transcript.slice(0, 47) + "..." : transcript;
+      session.conversationTitle = title;
+    }
+
+    // 10. Create streaming state and callback
     const state = new StreamingState();
     const statusCallback = createStatusCallback(ctx, state);
 
-    // 10. Send to Claude
+    // 11. Send to Claude
     const claudeResponse = await session.sendMessageStreaming(
       transcript,
       username,
@@ -108,7 +115,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
       ctx
     );
 
-    // 11. Audit log
+    // 12. Audit log
     await auditLog(userId, username, "VOICE", transcript, claudeResponse);
   } catch (error) {
     console.error("Error processing voice:", error);

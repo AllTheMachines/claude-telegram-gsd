@@ -166,7 +166,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
 }
 
 /**
- * /resume - Resume the last session.
+ * /resume - Show list of sessions to resume with inline keyboard.
  */
 export async function handleResume(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
@@ -177,16 +177,49 @@ export async function handleResume(ctx: Context): Promise<void> {
   }
 
   if (session.isActive) {
-    await ctx.reply("Session already active. Use /new to start fresh first.");
+    await ctx.reply("Sessione già attiva. Usa /new per iniziare da capo.");
     return;
   }
 
-  const [success, message] = session.resumeLast();
-  if (success) {
-    await ctx.reply(`✅ ${message}`);
-  } else {
-    await ctx.reply(`❌ ${message}`);
+  // Get saved sessions
+  const sessions = session.getSessionList();
+
+  if (sessions.length === 0) {
+    await ctx.reply("❌ Nessuna sessione salvata.");
+    return;
   }
+
+  // Build inline keyboard with session list
+  const buttons = sessions.map((s) => {
+    // Format date: "18/01 10:30"
+    const date = new Date(s.saved_at);
+    const dateStr = date.toLocaleDateString("it-IT", {
+      day: "2-digit",
+      month: "2-digit",
+    });
+    const timeStr = date.toLocaleTimeString("it-IT", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    // Truncate title for button (max ~40 chars to fit)
+    const titlePreview =
+      s.title.length > 35 ? s.title.slice(0, 32) + "..." : s.title;
+
+    return [
+      {
+        text: `📅 ${dateStr} ${timeStr} - "${titlePreview}"`,
+        callback_data: `resume:${s.session_id}`,
+      },
+    ];
+  });
+
+  await ctx.reply("📋 <b>Sessioni salvate</b>\n\nSeleziona una sessione da riprendere:", {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: buttons,
+    },
+  });
 }
 
 /**

@@ -82,7 +82,7 @@ Then send `/setcommands` to BotFather and paste this:
 ```
 start - Show status and user ID
 new - Start a fresh session
-resume - Resume last session
+resume - Pick from recent sessions to resume
 stop - Interrupt current query
 status - Check what Claude is doing
 restart - Restart the bot
@@ -133,7 +133,7 @@ The bot includes a built-in `ask_user` MCP server that lets Claude present optio
 | ---------- | --------------------------------- |
 | `/start`   | Show status and your user ID      |
 | `/new`     | Start a fresh session             |
-| `/resume`  | Resume last session after restart |
+| `/resume`  | Pick from last 5 sessions to resume (with recap) |
 | `/stop`    | Interrupt current query           |
 | `/status`  | Check what Claude is doing        |
 | `/restart` | Restart the bot                   |

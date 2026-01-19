@@ -72,6 +72,14 @@ async function processPhotos(
       : `Please analyze these ${photoPaths.length} images:\n${pathsList}`;
   }
 
+  // Set conversation title (if new session)
+  if (!session.isActive) {
+    const rawTitle = caption || "[Foto]";
+    const title =
+      rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
+    session.conversationTitle = title;
+  }
+
   // Start typing
   const typing = startTypingIndicator(ctx);
 

@@ -32,7 +32,13 @@ export async function handleCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  // 2. Parse callback data: askuser:{request_id}:{option_index}
+  // 2. Handle resume callbacks: resume:{session_id}
+  if (callbackData.startsWith("resume:")) {
+    await handleResumeCallback(ctx, callbackData);
+    return;
+  }
+
+  // 3. Parse callback data: askuser:{request_id}:{option_index}
   if (!callbackData.startsWith("askuser:")) {
     await ctx.answerCallbackQuery();
     return;
@@ -141,6 +147,70 @@ export async function handleCallback(ctx: Context): Promise<void> {
     } else {
       await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
     }
+  } finally {
+    typing.stop();
+  }
+}
+
+/**
+ * Handle resume session callback (resume:{session_id}).
+ */
+async function handleResumeCallback(
+  ctx: Context,
+  callbackData: string
+): Promise<void> {
+  const userId = ctx.from?.id;
+  const username = ctx.from?.username || "unknown";
+  const chatId = ctx.chat?.id;
+  const sessionId = callbackData.replace("resume:", "");
+
+  if (!sessionId || !userId || !chatId) {
+    await ctx.answerCallbackQuery({ text: "ID sessione non valido" });
+    return;
+  }
+
+  // Check if session is already active
+  if (session.isActive) {
+    await ctx.answerCallbackQuery({ text: "Sessione già attiva" });
+    return;
+  }
+
+  // Resume the selected session
+  const [success, message] = session.resumeSession(sessionId);
+
+  if (!success) {
+    await ctx.answerCallbackQuery({ text: message, show_alert: true });
+    return;
+  }
+
+  // Update the original message to show selection
+  try {
+    await ctx.editMessageText(`✅ ${message}`);
+  } catch (error) {
+    console.debug("Failed to edit resume message:", error);
+  }
+  await ctx.answerCallbackQuery({ text: "Sessione ripresa!" });
+
+  // Send a hidden recap prompt to Claude
+  const recapPrompt =
+    "Please write a very concise recap of where we are in this conversation, to refresh my memory. Max 2-3 sentences.";
+
+  const typing = startTypingIndicator(ctx);
+  const state = new StreamingState();
+  const statusCallback = createStatusCallback(ctx, state);
+
+  try {
+    await session.sendMessageStreaming(
+      recapPrompt,
+      username,
+      userId,
+      statusCallback,
+      chatId,
+      ctx
+    );
+  } catch (error) {
+    console.error("Error getting recap:", error);
+    // Don't show error to user - session is still resumed, recap just failed
   } finally {
     typing.stop();
   }

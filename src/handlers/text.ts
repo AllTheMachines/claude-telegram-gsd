@@ -52,17 +52,25 @@ export async function handleText(ctx: Context): Promise<void> {
   // 4. Store message for retry
   session.lastMessage = message;
 
-  // 5. Mark processing started
+  // 5. Set conversation title from first message (if new session)
+  if (!session.isActive) {
+    // Truncate title to ~50 chars
+    const title =
+      message.length > 50 ? message.slice(0, 47) + "..." : message;
+    session.conversationTitle = title;
+  }
+
+  // 6. Mark processing started
   const stopProcessing = session.startProcessing();
 
-  // 6. Start typing indicator
+  // 7. Start typing indicator
   const typing = startTypingIndicator(ctx);
 
-  // 7. Create streaming state and callback
+  // 8. Create streaming state and callback
   let state = new StreamingState();
   let statusCallback = createStatusCallback(ctx, state);
 
-  // 8. Send to Claude with retry logic for crashes
+  // 9. Send to Claude with retry logic for crashes
   const MAX_RETRIES = 1;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -76,7 +84,7 @@ export async function handleText(ctx: Context): Promise<void> {
         ctx
       );
 
-      // 9. Audit log
+      // 10. Audit log
       await auditLog(userId, username, "TEXT", message, response);
       break; // Success - exit retry loop
     } catch (error) {
@@ -122,7 +130,7 @@ export async function handleText(ctx: Context): Promise<void> {
     }
   }
 
-  // 10. Cleanup
+  // 11. Cleanup
   stopProcessing();
   typing.stop();
 }

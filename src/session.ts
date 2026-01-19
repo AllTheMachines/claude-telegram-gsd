@@ -26,7 +26,12 @@ import {
 import { formatToolStatus } from "./formatting";
 import { checkPendingAskUserRequests } from "./handlers/streaming";
 import { checkCommandSafety, isPathAllowed } from "./security";
-import type { SessionData, StatusCallback, TokenUsage } from "./types";
+import type {
+  SavedSession,
+  SessionHistory,
+  StatusCallback,
+  TokenUsage,
+} from "./types";
 
 /**
  * Determine thinking token budget based on message keywords.
@@ -66,6 +71,9 @@ function getTextFromMessage(msg: SDKMessage): string | null {
 /**
  * Manages Claude Code sessions using the Agent SDK V1.
  */
+// Maximum number of sessions to keep in history
+const MAX_SESSIONS = 5;
+
 class ClaudeSession {
   sessionId: string | null = null;
   lastActivity: Date | null = null;
@@ -76,6 +84,7 @@ class ClaudeSession {
   lastErrorTime: Date | null = null;
   lastUsage: TokenUsage | null = null;
   lastMessage: string | null = null;
+  conversationTitle: string | null = null;
 
   private abortController: AbortController | null = null;
   private isQueryRunning = false;
@@ -463,22 +472,45 @@ class ClaudeSession {
   async kill(): Promise<void> {
     this.sessionId = null;
     this.lastActivity = null;
+    this.conversationTitle = null;
     console.log("Session cleared");
   }
 
   /**
    * Save session to disk for resume after restart.
+   * Saves to multi-session history format.
    */
-  private saveSession(): void {
+  saveSession(): void {
     if (!this.sessionId) return;
 
     try {
-      const data: SessionData = {
+      // Load existing session history
+      const history = this.loadSessionHistory();
+
+      // Create new session entry
+      const newSession: SavedSession = {
         session_id: this.sessionId,
         saved_at: new Date().toISOString(),
         working_dir: WORKING_DIR,
+        title: this.conversationTitle || "Sessione senza titolo",
       };
-      Bun.write(SESSION_FILE, JSON.stringify(data));
+
+      // Remove any existing entry with same session_id (update in place)
+      const existingIndex = history.sessions.findIndex(
+        (s) => s.session_id === this.sessionId
+      );
+      if (existingIndex !== -1) {
+        history.sessions[existingIndex] = newSession;
+      } else {
+        // Add new session at the beginning
+        history.sessions.unshift(newSession);
+      }
+
+      // Keep only the last MAX_SESSIONS
+      history.sessions = history.sessions.slice(0, MAX_SESSIONS);
+
+      // Save
+      Bun.write(SESSION_FILE, JSON.stringify(history, null, 2));
       console.log(`Session saved to ${SESSION_FILE}`);
     } catch (error) {
       console.warn(`Failed to save session: ${error}`);
@@ -486,46 +518,75 @@ class ClaudeSession {
   }
 
   /**
-   * Resume the last persisted session.
+   * Load session history from disk.
    */
-  resumeLast(): [success: boolean, message: string] {
+  private loadSessionHistory(): SessionHistory {
     try {
       const file = Bun.file(SESSION_FILE);
       if (!file.size) {
-        return [false, "No saved session found"];
+        return { sessions: [] };
       }
 
       const text = readFileSync(SESSION_FILE, "utf-8");
-      const data: SessionData = JSON.parse(text);
-
-      if (!data.session_id) {
-        return [false, "Saved session file is empty"];
-      }
-
-      if (data.working_dir && data.working_dir !== WORKING_DIR) {
-        return [
-          false,
-          `Session was for different directory: ${data.working_dir}`,
-        ];
-      }
-
-      this.sessionId = data.session_id;
-      this.lastActivity = new Date();
-      console.log(
-        `Resumed session ${data.session_id.slice(0, 8)}... (saved at ${
-          data.saved_at
-        })`
-      );
-      return [
-        true,
-        `Resumed session \`${data.session_id.slice(0, 8)}...\` (saved at ${
-          data.saved_at
-        })`,
-      ];
-    } catch (error) {
-      console.error(`Failed to resume session: ${error}`);
-      return [false, `Failed to load session: ${error}`];
+      return JSON.parse(text) as SessionHistory;
+    } catch {
+      return { sessions: [] };
     }
+  }
+
+  /**
+   * Get list of saved sessions for display.
+   */
+  getSessionList(): SavedSession[] {
+    const history = this.loadSessionHistory();
+    // Filter to only sessions for current working directory
+    return history.sessions.filter(
+      (s) => !s.working_dir || s.working_dir === WORKING_DIR
+    );
+  }
+
+  /**
+   * Resume a specific session by ID.
+   */
+  resumeSession(sessionId: string): [success: boolean, message: string] {
+    const history = this.loadSessionHistory();
+    const sessionData = history.sessions.find((s) => s.session_id === sessionId);
+
+    if (!sessionData) {
+      return [false, "Sessione non trovata"];
+    }
+
+    if (sessionData.working_dir && sessionData.working_dir !== WORKING_DIR) {
+      return [
+        false,
+        `Sessione per directory diversa: ${sessionData.working_dir}`,
+      ];
+    }
+
+    this.sessionId = sessionData.session_id;
+    this.conversationTitle = sessionData.title;
+    this.lastActivity = new Date();
+
+    console.log(
+      `Resumed session ${sessionData.session_id.slice(0, 8)}... - "${sessionData.title}"`
+    );
+
+    return [
+      true,
+      `Ripresa sessione: "${sessionData.title}"`,
+    ];
+  }
+
+  /**
+   * Resume the last persisted session (legacy method, now resumes most recent).
+   */
+  resumeLast(): [success: boolean, message: string] {
+    const sessions = this.getSessionList();
+    if (sessions.length === 0) {
+      return [false, "Nessuna sessione salvata"];
+    }
+
+    return this.resumeSession(sessions[0]!.session_id);
   }
 }
 

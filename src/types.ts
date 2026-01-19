@@ -18,11 +18,16 @@ export interface RateLimitBucket {
   lastUpdate: number;
 }
 
-// Session persistence data
-export interface SessionData {
+// Session persistence
+export interface SavedSession {
   session_id: string;
   saved_at: string;
   working_dir: string;
+  title: string; // First message truncated (max ~50 chars)
+}
+
+export interface SessionHistory {
+  sessions: SavedSession[];
 }
 
 // Token usage from Claude
