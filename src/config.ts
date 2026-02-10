@@ -154,7 +154,17 @@ const BASE_TRANSCRIPTION_PROMPT = `Transcribe this voice message accurately.
 The speaker may use multiple languages (English, and possibly others).
 Focus on accuracy for proper nouns, technical terms, and commands.`;
 
-const TRANSCRIPTION_CONTEXT = process.env.TRANSCRIPTION_CONTEXT || "";
+let TRANSCRIPTION_CONTEXT = "";
+if (process.env.TRANSCRIPTION_CONTEXT_FILE) {
+  try {
+    const file = Bun.file(process.env.TRANSCRIPTION_CONTEXT_FILE);
+    if (await file.exists()) {
+      TRANSCRIPTION_CONTEXT = (await file.text()).trim();
+    }
+  } catch {
+    // File not found or unreadable — proceed without context
+  }
+}
 
 export const TRANSCRIPTION_PROMPT = TRANSCRIPTION_CONTEXT
   ? `${BASE_TRANSCRIPTION_PROMPT}\n\nAdditional context:\n${TRANSCRIPTION_CONTEXT}`
