@@ -90,6 +90,51 @@ export class StreamingState {
 }
 
 /**
+ * Format content for Telegram, ensuring it fits within the message limit.
+ * Truncates raw content and re-converts if HTML output exceeds the limit.
+ */
+function formatWithinLimit(
+  content: string,
+  safeLimit: number = TELEGRAM_SAFE_LIMIT
+): string {
+  let display =
+    content.length > safeLimit ? content.slice(0, safeLimit) + "..." : content;
+  let formatted = convertMarkdownToHtml(display);
+
+  // HTML tags can inflate content beyond the limit - shrink until it fits
+  if (formatted.length > TELEGRAM_MESSAGE_LIMIT) {
+    const ratio = TELEGRAM_MESSAGE_LIMIT / formatted.length;
+    display = content.slice(0, Math.floor(safeLimit * ratio * 0.95)) + "...";
+    formatted = convertMarkdownToHtml(display);
+  }
+
+  return formatted;
+}
+
+/**
+ * Split long formatted content into chunks and send as separate messages.
+ */
+async function sendChunkedMessages(
+  ctx: Context,
+  content: string
+): Promise<void> {
+  // Split on markdown content first, then format each chunk
+  for (let i = 0; i < content.length; i += TELEGRAM_SAFE_LIMIT) {
+    const chunk = content.slice(i, i + TELEGRAM_SAFE_LIMIT);
+    try {
+      await ctx.reply(chunk, { parse_mode: "HTML" });
+    } catch {
+      // HTML failed (possibly broken tags from split) - try plain text
+      try {
+        await ctx.reply(chunk);
+      } catch (plainError) {
+        console.debug("Failed to send chunk:", plainError);
+      }
+    }
+  }
+}
+
+/**
  * Create a status callback for streaming updates.
  */
 export function createStatusCallback(
@@ -116,11 +161,7 @@ export function createStatusCallback(
 
         if (!state.textMessages.has(segmentId)) {
           // New segment - create message
-          const display =
-            content.length > TELEGRAM_SAFE_LIMIT
-              ? content.slice(0, TELEGRAM_SAFE_LIMIT) + "..."
-              : content;
-          const formatted = convertMarkdownToHtml(display);
+          const formatted = formatWithinLimit(content);
           try {
             const msg = await ctx.reply(formatted, { parse_mode: "HTML" });
             state.textMessages.set(segmentId, msg);
@@ -136,11 +177,7 @@ export function createStatusCallback(
         } else if (now - lastEdit > STREAMING_THROTTLE_MS) {
           // Update existing segment message (throttled)
           const msg = state.textMessages.get(segmentId)!;
-          const display =
-            content.length > TELEGRAM_SAFE_LIMIT
-              ? content.slice(0, TELEGRAM_SAFE_LIMIT) + "..."
-              : content;
-          const formatted = convertMarkdownToHtml(display);
+          const formatted = formatWithinLimit(content);
           // Skip if content unchanged
           if (formatted === state.lastContent.get(segmentId)) {
             return;
@@ -155,17 +192,25 @@ export function createStatusCallback(
               }
             );
             state.lastContent.set(segmentId, formatted);
-          } catch (htmlError) {
-            console.debug("HTML edit failed, trying plain text:", htmlError);
-            try {
-              await ctx.api.editMessageText(
-                msg.chat.id,
-                msg.message_id,
-                formatted
+          } catch (error) {
+            const errorStr = String(error);
+            if (errorStr.includes("MESSAGE_TOO_LONG")) {
+              // Skip this intermediate update - segment_end will chunk properly
+              console.debug(
+                "Streaming edit too long, deferring to segment_end"
               );
-              state.lastContent.set(segmentId, formatted);
-            } catch (editError) {
-              console.debug("Edit message failed:", editError);
+            } else {
+              console.debug("HTML edit failed, trying plain text:", error);
+              try {
+                await ctx.api.editMessageText(
+                  msg.chat.id,
+                  msg.message_id,
+                  formatted
+                );
+                state.lastContent.set(segmentId, formatted);
+              } catch (editError) {
+                console.debug("Edit message failed:", editError);
+              }
             }
           }
           state.lastEditTimes.set(segmentId, now);
@@ -191,7 +236,18 @@ export function createStatusCallback(
                 }
               );
             } catch (error) {
-              console.debug("Failed to edit final message:", error);
+              const errorStr = String(error);
+              if (errorStr.includes("MESSAGE_TOO_LONG")) {
+                // HTML overhead pushed it over - delete and chunk
+                try {
+                  await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
+                } catch (delError) {
+                  console.debug("Failed to delete for chunking:", delError);
+                }
+                await sendChunkedMessages(ctx, formatted);
+              } else {
+                console.debug("Failed to edit final message:", error);
+              }
             }
           } else {
             // Too long - delete and split
@@ -200,18 +256,7 @@ export function createStatusCallback(
             } catch (error) {
               console.debug("Failed to delete message for splitting:", error);
             }
-            for (let i = 0; i < formatted.length; i += TELEGRAM_SAFE_LIMIT) {
-              const chunk = formatted.slice(i, i + TELEGRAM_SAFE_LIMIT);
-              try {
-                await ctx.reply(chunk, { parse_mode: "HTML" });
-              } catch (htmlError) {
-                console.debug(
-                  "HTML chunk failed, using plain text:",
-                  htmlError
-                );
-                await ctx.reply(chunk);
-              }
-            }
+            await sendChunkedMessages(ctx, formatted);
           }
         }
       } else if (statusType === "done") {

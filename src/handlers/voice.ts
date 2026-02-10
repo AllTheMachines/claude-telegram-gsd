@@ -87,11 +87,16 @@ export async function handleVoice(ctx: Context): Promise<void> {
       return;
     }
 
-    // 8. Show transcript
+    // 8. Show transcript (truncate display if needed - full transcript still sent to Claude)
+    const maxDisplay = 4000; // Leave room for 🎤 "" wrapper within 4096 limit
+    const displayTranscript =
+      transcript.length > maxDisplay
+        ? transcript.slice(0, maxDisplay) + "…"
+        : transcript;
     await ctx.api.editMessageText(
       chatId,
       statusMsg.message_id,
-      `🎤 "${transcript}"`
+      `🎤 "${displayTranscript}"`
     );
 
     // 9. Set conversation title from transcript (if new session)
