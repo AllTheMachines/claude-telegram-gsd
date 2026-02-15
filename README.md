@@ -8,8 +8,6 @@
 
 Send text, voice, photos, documents, audio, and video. Plan and execute GSD phases, manage todos, switch between projects — all from Telegram with tappable buttons. Zero API cost, runs through your Claude Code subscription.
 
-![Demo](assets/demo.gif)
-
 ## GSD Workflow Integration
 
 This fork adds deep integration with the [GSD (Get Stuff Done)](https://github.com/coleam00/claude-code-gsd) workflow for Claude Code. Tap `/gsd` to get a button grid with all 16 GSD operations:
@@ -35,14 +33,6 @@ The bot spawns `claude` CLI as a subprocess, piping your Telegram messages in an
 - **Full Claude Code capabilities** — tools, MCP servers, file access, shell commands
 - **Real streaming** — text appears as Claude writes it, not dumped at the end
 - **Session persistence** — conversations continue across messages via `--resume`
-
-## Claude Code as a Personal Assistant
-
-While Claude Code is described as a powerful AI **coding agent**, it's actually a very capable **general-purpose agent** too when given the right instructions, context, and tools.
-
-Set up a folder with a CLAUDE.md that teaches Claude about you (your preferences, where your notes live, my workflows), add tools and scripts based on your needs, and point this bot at that folder.
-
-> **[See the Personal Assistant Guide](docs/personal-assistant-guide.md)** for detailed setup and examples.
 
 ## Features
 
@@ -77,8 +67,8 @@ Set up a folder with a CLAUDE.md that teaches Claude about you (your preferences
 ## Quick Start
 
 ```bash
-git clone https://github.com/linuz90/claude-telegram-bot.git
-cd claude-telegram-bot
+git clone https://github.com/AllTheMachines/claude-telegram-gsd.git
+cd claude-telegram-gsd
 
 cp .env.example .env
 # Edit .env with your credentials
@@ -195,7 +185,7 @@ alias cbot-logs='tail -f /tmp/claude-telegram-bot-ts.log'
 ## Running on Windows
 
 ```bash
-cd claude-telegram-bot
+cd claude-telegram-gsd
 npx tsx src/index.ts
 ```
 
@@ -248,6 +238,10 @@ Multiple layers protect against misuse:
 **Context limit reached**
 - The bot auto-detects context limit errors and clears the session
 - You'll see a message telling you to send your question again
+
+## Credits
+
+Forked from [linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot) by [Fabrizio Rinaldi](https://github.com/linuz90). The original project provides the core Telegram-to-Claude bridge, media handling, and security model. This fork adds GSD workflow integration, CLI subprocess architecture, action buttons, project switching, and context tracking.
 
 ## License
 
