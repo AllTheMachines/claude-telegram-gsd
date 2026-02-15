@@ -6,10 +6,8 @@ This document describes the security architecture of the Claude Telegram Bot.
 
 **This bot runs Claude Code with all permission prompts disabled.**
 
-```typescript
-// src/session.ts
-permissionMode: "bypassPermissions"
-allowDangerouslySkipPermissions: true
+```
+claude -p --dangerously-skip-permissions ...
 ```
 
 This means Claude can:
