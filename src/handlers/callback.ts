@@ -60,11 +60,9 @@ export async function handleCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  // 2e. Handle GSD phase picker: gsd-exec:{phase} or gsd-plan:{phase}
-  if (
-    callbackData.startsWith("gsd-exec:") ||
-    callbackData.startsWith("gsd-plan:")
-  ) {
+  // 2e. Handle GSD phase picker: gsd-{op}:{phase}
+  const gsdPhasePrefixes = ["gsd-exec:", "gsd-plan:", "gsd-discuss:", "gsd-research:", "gsd-verify:", "gsd-remove:"];
+  if (gsdPhasePrefixes.some((p) => callbackData.startsWith(p))) {
     await handleGsdPhaseCallback(ctx, callbackData, chatId);
     return;
   }
@@ -381,6 +379,10 @@ async function handleProjectCallback(
 const PHASE_PICKER_OPS: Record<string, string> = {
   execute: "gsd-exec",
   plan: "gsd-plan",
+  discuss: "gsd-discuss",
+  research: "gsd-research",
+  verify: "gsd-verify",
+  "remove-phase": "gsd-remove",
 };
 
 /**
@@ -409,19 +411,22 @@ async function handleGsdCallback(
   const pickerPrefix = PHASE_PICKER_OPS[operation];
   if (pickerPrefix) {
     const phases = parseRoadmap(session.currentWorkingDir);
-    // Show only pending phases for execute/plan
-    const pendingPhases = phases.filter((p) => p.status === "pending");
+    // Verify shows all phases (done + pending), others show only pending
+    const showDone = operation === "verify";
+    const filteredPhases = showDone
+      ? phases.filter((p) => p.status !== "skipped")
+      : phases.filter((p) => p.status === "pending");
 
-    if (pendingPhases.length === 0) {
+    if (filteredPhases.length === 0) {
       await ctx.answerCallbackQuery({
-        text: "No pending phases found",
+        text: showDone ? "No phases found" : "No pending phases found",
         show_alert: true,
       });
       return;
     }
 
     // Build phase picker keyboard: one button per row
-    const buttons = pendingPhases.map((p) => [
+    const buttons = filteredPhases.map((p) => [
       {
         text: `Phase ${p.number}: ${p.name}`,
         callback_data: `${pickerPrefix}:${p.number}`,
@@ -459,7 +464,19 @@ async function handleGsdCallback(
 }
 
 /**
- * Handle GSD phase picker callback (gsd-exec:{phase} or gsd-plan:{phase}).
+ * Map gsd phase callback prefix to slash command and label.
+ */
+const PHASE_CALLBACK_MAP: Record<string, [string, string]> = {
+  "gsd-exec": ["/gsd:execute-phase", "Execute Phase"],
+  "gsd-plan": ["/gsd:plan-phase", "Plan Phase"],
+  "gsd-discuss": ["/gsd:discuss-phase", "Discuss Phase"],
+  "gsd-research": ["/gsd:research-phase", "Research Phase"],
+  "gsd-verify": ["/gsd:verify-work", "Verify Phase"],
+  "gsd-remove": ["/gsd:remove-phase", "Remove Phase"],
+};
+
+/**
+ * Handle GSD phase picker callback (gsd-{op}:{phase}).
  */
 async function handleGsdPhaseCallback(
   ctx: Context,
@@ -469,12 +486,15 @@ async function handleGsdPhaseCallback(
   const username = ctx.from?.username || "unknown";
   const userId = ctx.from?.id!;
 
-  const isExec = callbackData.startsWith("gsd-exec:");
-  const phaseNum = callbackData.split(":")[1]!;
-  const command = isExec
-    ? `/gsd:execute-phase ${phaseNum}`
-    : `/gsd:plan-phase ${phaseNum}`;
-  const label = isExec ? `Execute Phase ${phaseNum}` : `Plan Phase ${phaseNum}`;
+  const [prefix, phaseNum] = callbackData.split(":");
+  const mapping = PHASE_CALLBACK_MAP[prefix!];
+  if (!mapping || !phaseNum) {
+    await ctx.answerCallbackQuery({ text: "Unknown phase operation" });
+    return;
+  }
+  const [slashCmd, labelPrefix] = mapping;
+  const command = `${slashCmd} ${phaseNum}`;
+  const label = `${labelPrefix} ${phaseNum}`;
 
   // Update message to show selection
   try {

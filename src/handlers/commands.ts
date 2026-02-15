@@ -400,12 +400,30 @@ export async function handleProject(ctx: Context): Promise<void> {
  * Maps callback data suffix to [label, slash command].
  */
 export const GSD_OPERATIONS: [string, string, string][] = [
+  // Row 1: Most used
   ["progress", "Progress", "/gsd:progress"],
-  ["todos", "Check Todos", "/gsd:check-todos"],
-  ["execute", "Execute Phase", "/gsd:execute-phase"],
-  ["plan", "Plan Phase", "/gsd:plan-phase"],
   ["quick", "Quick Task", "/gsd:quick"],
+  // Row 2: Phase workflow
+  ["plan", "Plan Phase", "/gsd:plan-phase"],
+  ["execute", "Execute Phase", "/gsd:execute-phase"],
+  // Row 3: Phase tools
+  ["discuss", "Discuss Phase", "/gsd:discuss-phase"],
+  ["research", "Research Phase", "/gsd:research-phase"],
+  // Row 4: Verification
+  ["verify", "Verify Work", "/gsd:verify-work"],
+  ["audit", "Audit Milestone", "/gsd:audit-milestone"],
+  // Row 5: Todos
+  ["todos", "Check Todos", "/gsd:check-todos"],
   ["todo", "Add Todo", "/gsd:add-todo"],
+  // Row 6: Phase management
+  ["add-phase", "Add Phase", "/gsd:add-phase"],
+  ["remove-phase", "Remove Phase", "/gsd:remove-phase"],
+  // Row 7: Project management
+  ["new-milestone", "New Milestone", "/gsd:new-milestone"],
+  ["settings", "Settings", "/gsd:settings"],
+  // Row 8: Debug & help
+  ["debug", "Debug", "/gsd:debug"],
+  ["help", "Help", "/gsd:help"],
 ];
 
 /**
