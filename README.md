@@ -1,13 +1,31 @@
-# Claude Telegram Bot
+# Claude Telegram Bot + GSD
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
+[![GSD](https://img.shields.io/badge/GSD-workflow-blue.svg)](https://github.com/coleam00/claude-code-gsd)
 
-**Turn [Claude Code](https://claude.com/product/claude-code) into your personal assistant, accessible from anywhere via Telegram.**
+**Control Claude Code from your phone — with full [GSD workflow](https://github.com/coleam00/claude-code-gsd) integration.**
 
-Send text, voice, photos, documents, audio, and video. See responses and tool usage streaming in real-time. Zero API cost — runs through your Claude Code subscription.
+Send text, voice, photos, documents, audio, and video. Plan and execute GSD phases, manage todos, switch between projects — all from Telegram with tappable buttons. Zero API cost, runs through your Claude Code subscription.
 
 ![Demo](assets/demo.gif)
+
+## GSD Workflow Integration
+
+This fork adds deep integration with the [GSD (Get Stuff Done)](https://github.com/coleam00/claude-code-gsd) workflow for Claude Code. Tap `/gsd` to get a button grid with all 16 GSD operations:
+
+| | |
+|---|---|
+| Progress | Quick Task |
+| Plan Phase | Execute Phase |
+| Discuss Phase | Research Phase |
+| Verify Work | Audit Milestone |
+| Check Todos | Add Todo |
+| Add Phase | Remove Phase |
+| New Milestone | Settings |
+| Debug | Help |
+
+Phase-based operations (Plan, Execute, Discuss, Research, Verify, Remove) show a second-level picker with your roadmap phases. Combined with `/project` to switch between projects, you can manage your entire GSD workflow from your phone or watch.
 
 ## How It Works
 
@@ -22,7 +40,7 @@ The bot spawns `claude` CLI as a subprocess, piping your Telegram messages in an
 
 While Claude Code is described as a powerful AI **coding agent**, it's actually a very capable **general-purpose agent** too when given the right instructions, context, and tools.
 
-Set up a folder with a CLAUDE.md that teaches Claude about you (your preferences, where your notes live, your workflows), add tools and scripts based on your needs, and point this bot at that folder.
+Set up a folder with a CLAUDE.md that teaches Claude about you (your preferences, where your notes live, my workflows), add tools and scripts based on your needs, and point this bot at that folder.
 
 > **[See the Personal Assistant Guide](docs/personal-assistant-guide.md)** for detailed setup and examples.
 
