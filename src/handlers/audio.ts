@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "grammy";
-import { unlinkSync } from "fs";
+import { unlinkSync, writeFileSync } from "fs";
 import { session } from "../session";
 import { ALLOWED_USERS, TEMP_DIR, TRANSCRIPTION_AVAILABLE } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
@@ -188,7 +188,7 @@ export async function handleAudio(ctx: Context): Promise<void> {
       `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`
     );
     const buffer = await response.arrayBuffer();
-    await Bun.write(audioPath, buffer);
+    writeFileSync(audioPath, Buffer.from(buffer));
   } catch (error) {
     console.error("Failed to download audio:", error);
     await ctx.reply("❌ Failed to download audio file.");

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Ask User MCP Server - Presents options as Telegram inline keyboard buttons.
  *
@@ -15,6 +15,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { resolve } from "path";
+import { randomUUID } from "crypto";
 
 // Create the MCP server
 const server = new Server(
@@ -79,7 +83,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   // Generate request ID and get chat context from environment
-  const requestUuid = crypto.randomUUID().slice(0, 8);
+  const requestUuid = randomUUID().slice(0, 8);
   const chatId = process.env.TELEGRAM_CHAT_ID || "";
 
   // Write request file for the bot to pick up
@@ -92,8 +96,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     created_at: new Date().toISOString(),
   };
 
-  const requestFile = `/tmp/ask-user-${requestUuid}.json`;
-  await Bun.write(requestFile, JSON.stringify(requestData, null, 2));
+  const requestFile = resolve(tmpdir(), `ask-user-${requestUuid}.json`);
+  writeFileSync(requestFile, JSON.stringify(requestData, null, 2));
 
   return {
     content: [

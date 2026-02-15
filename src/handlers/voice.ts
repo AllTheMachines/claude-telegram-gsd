@@ -3,7 +3,7 @@
  */
 
 import type { Context } from "grammy";
-import { unlinkSync } from "fs";
+import { unlinkSync, writeFileSync } from "fs";
 import { session } from "../session";
 import { ALLOWED_USERS, TEMP_DIR, TRANSCRIPTION_AVAILABLE } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
@@ -71,7 +71,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
       `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`
     );
     const buffer = await downloadRes.arrayBuffer();
-    await Bun.write(voicePath, buffer);
+    writeFileSync(voicePath, Buffer.from(buffer));
 
     // 7. Transcribe
     const statusMsg = await ctx.reply("🎤 Transcribing...");

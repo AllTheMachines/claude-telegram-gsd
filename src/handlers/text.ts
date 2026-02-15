@@ -86,6 +86,35 @@ export async function handleText(ctx: Context): Promise<void> {
 
       // 10. Audit log
       await auditLog(userId, username, "TEXT", message, response);
+
+      // 10b. Show context bar + action buttons
+      {
+        const pct = session.contextPercent;
+        const barText = pct !== null
+          ? (() => {
+              const clamped = Math.min(pct, 100);
+              const filled = Math.min(Math.round(clamped / 10), 10);
+              return "█".repeat(filled) + "░".repeat(10 - filled) + ` ${clamped}%`;
+            })()
+          : null;
+
+        const keyboard = {
+          inline_keyboard: [
+            [
+              { text: "🛑 Stop", callback_data: "action:stop" },
+              { text: "🔄 Retry", callback_data: "action:retry" },
+              { text: "🆕 New", callback_data: "action:new" },
+              { text: "📋 GSD", callback_data: "action:gsd" },
+            ],
+          ],
+        };
+
+        await ctx.reply(barText || "—", {
+          reply_markup: keyboard,
+          disable_notification: true,
+        });
+      }
+
       break; // Success - exit retry loop
     } catch (error) {
       const errorStr = String(error);

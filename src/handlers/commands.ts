@@ -5,9 +5,55 @@
  */
 
 import type { Context } from "grammy";
+import { writeFileSync, readFileSync, existsSync } from "fs";
+import { join } from "path";
 import { session } from "../session";
-import { WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "../config";
+import { ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
+import { sleep } from "../utils";
+import { parseRegistry } from "../registry";
+
+/**
+ * Parsed phase from ROADMAP.md.
+ */
+export interface RoadmapPhase {
+  number: string;
+  name: string;
+  description: string;
+  status: "done" | "pending" | "skipped";
+}
+
+/**
+ * Parse ROADMAP.md from a project directory.
+ * Format: - [x] **Phase 2: Name** - Description
+ */
+export function parseRoadmap(workingDir: string): RoadmapPhase[] {
+  const roadmapPath = join(workingDir, ".planning", "ROADMAP.md");
+  if (!existsSync(roadmapPath)) return [];
+
+  try {
+    const content = readFileSync(roadmapPath, "utf-8");
+    const phases: RoadmapPhase[] = [];
+    const regex = /^- \[(.)\] \*\*Phase ([\d.]+): ([^*]+)\*\* - (.+)$/gm;
+    let match;
+
+    while ((match = regex.exec(content)) !== null) {
+      const statusChar = match[1]!;
+      phases.push({
+        number: match[2]!,
+        name: match[3]!.trim(),
+        description: match[4]!.trim(),
+        status:
+          statusChar === "x" ? "done" : statusChar === "~" ? "skipped" : "pending",
+      });
+    }
+
+    return phases;
+  } catch {
+    return [];
+  }
+}
+
 
 /**
  * /start - Show welcome message and status.
@@ -22,7 +68,7 @@ export async function handleStart(ctx: Context): Promise<void> {
   }
 
   const status = session.isActive ? "Active session" : "No active session";
-  const workDir = WORKING_DIR;
+  const workDir = session.currentWorkingDir;
 
   await ctx.reply(
     `🤖 <b>Claude Telegram Bot</b>\n\n` +
@@ -32,6 +78,8 @@ export async function handleStart(ctx: Context): Promise<void> {
       `/new - Start fresh session\n` +
       `/stop - Stop current query\n` +
       `/status - Show detailed status\n` +
+      `/project - Switch project\n` +
+      `/gsd - GSD operations\n` +
       `/resume - Resume last session\n` +
       `/retry - Retry last message\n` +
       `/restart - Restart the bot\n\n` +
@@ -58,7 +106,7 @@ export async function handleNew(ctx: Context): Promise<void> {
   if (session.isRunning) {
     const result = await session.stop();
     if (result) {
-      await Bun.sleep(100);
+      await sleep(100);
       session.clearStopRequested();
     }
   }
@@ -84,7 +132,7 @@ export async function handleStop(ctx: Context): Promise<void> {
     const result = await session.stop();
     if (result) {
       // Wait for the abort to be processed, then clear stopRequested so next message can proceed
-      await Bun.sleep(100);
+      await sleep(100);
       session.clearStopRequested();
     }
     // Silent stop - no message shown
@@ -160,9 +208,38 @@ export async function handleStatus(ctx: Context): Promise<void> {
   }
 
   // Working directory
-  lines.push(`\n📁 Working dir: <code>${WORKING_DIR}</code>`);
+  lines.push(`\n📁 Working dir: <code>${session.currentWorkingDir}</code>`);
 
-  await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+  // Context percentage
+  if (session.contextPercent !== null) {
+    const pct = Math.min(session.contextPercent, 100);
+    const filled = Math.min(Math.round(pct / 10), 10);
+    const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+    lines.push(`\n${bar} ${pct}%`);
+  }
+
+  // Action buttons
+  const buttons: { text: string; callback_data: string }[][] = [];
+  if (session.isActive) {
+    buttons.push([
+      { text: "🆕 New Session", callback_data: "action:new" },
+      { text: "📂 Switch Project", callback_data: "action:project" },
+    ]);
+    buttons.push([
+      { text: "📋 GSD", callback_data: "action:gsd" },
+      { text: "🔄 Retry Last", callback_data: "action:retry" },
+    ]);
+  } else {
+    buttons.push([
+      { text: "📂 Switch Project", callback_data: "action:project" },
+      { text: "🔁 Resume", callback_data: "action:resume" },
+    ]);
+  }
+
+  await ctx.reply(lines.join("\n"), {
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: buttons },
+  });
 }
 
 /**
@@ -177,7 +254,7 @@ export async function handleResume(ctx: Context): Promise<void> {
   }
 
   if (session.isActive) {
-    await ctx.reply("Sessione già attiva. Usa /new per iniziare da capo.");
+    await ctx.reply("Session already active. Use /new to start fresh.");
     return;
   }
 
@@ -185,7 +262,7 @@ export async function handleResume(ctx: Context): Promise<void> {
   const sessions = session.getSessionList();
 
   if (sessions.length === 0) {
-    await ctx.reply("❌ Nessuna sessione salvata.");
+    await ctx.reply("❌ No saved sessions.");
     return;
   }
 
@@ -193,11 +270,11 @@ export async function handleResume(ctx: Context): Promise<void> {
   const buttons = sessions.map((s) => {
     // Format date: "18/01 10:30"
     const date = new Date(s.saved_at);
-    const dateStr = date.toLocaleDateString("it-IT", {
+    const dateStr = date.toLocaleDateString("en-US", {
       day: "2-digit",
       month: "2-digit",
     });
-    const timeStr = date.toLocaleTimeString("it-IT", {
+    const timeStr = date.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -214,7 +291,7 @@ export async function handleResume(ctx: Context): Promise<void> {
     ];
   });
 
-  await ctx.reply("📋 <b>Sessioni salvate</b>\n\nSeleziona una sessione da riprendere:", {
+  await ctx.reply("📋 <b>Saved Sessions</b>\n\nSelect a session to resume:", {
     parse_mode: "HTML",
     reply_markup: {
       inline_keyboard: buttons,
@@ -239,7 +316,7 @@ export async function handleRestart(ctx: Context): Promise<void> {
   // Save message info so we can update it after restart
   if (chatId && msg.message_id) {
     try {
-      await Bun.write(
+      writeFileSync(
         RESTART_FILE,
         JSON.stringify({
           chat_id: chatId,
@@ -253,10 +330,142 @@ export async function handleRestart(ctx: Context): Promise<void> {
   }
 
   // Give time for the message to send
-  await Bun.sleep(500);
+  await sleep(500);
 
   // Exit - launchd will restart us
   process.exit(0);
+}
+
+/**
+ * /project - Show project picker with inline keyboard.
+ */
+export async function handleProject(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  const projects = parseRegistry();
+  if (projects.length === 0) {
+    await ctx.reply("❌ Could not load project registry.");
+    return;
+  }
+
+  // Find current project name
+  const currentDir = session.currentWorkingDir.replace(/\\/g, "/");
+  const currentProject = projects.find(
+    (p) => p.location.replace(/\\/g, "/") === currentDir
+  );
+  const currentLabel = currentProject
+    ? currentProject.name
+    : currentDir.split("/").pop() || currentDir;
+
+  // Build inline keyboard: one button per row
+  // Active projects get a star prefix, current project gets a checkmark
+  const buttons = projects.map((p, index) => {
+    const isCurrent =
+      p.location.replace(/\\/g, "/") === currentDir;
+    const isActive = p.status === "Active";
+
+    let label = p.name;
+    if (isCurrent) label = `>> ${label}`;
+    else if (isActive) label = `* ${label}`;
+
+    return [
+      {
+        text: label,
+        callback_data: `project:${index}`,
+      },
+    ];
+  });
+
+  await ctx.reply(
+    `📂 <b>Switch Project</b>\n\n` +
+      `Current: <b>${currentLabel}</b>\n` +
+      `<code>${currentDir}</code>\n\n` +
+      `<code>*</code> = Active  <code>>></code> = Current`,
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: buttons,
+      },
+    }
+  );
+}
+
+/**
+ * GSD operations for the inline keyboard.
+ * Maps callback data suffix to [label, slash command].
+ */
+export const GSD_OPERATIONS: [string, string, string][] = [
+  ["progress", "Progress", "/gsd:progress"],
+  ["todos", "Check Todos", "/gsd:check-todos"],
+  ["execute", "Execute Phase", "/gsd:execute-phase"],
+  ["plan", "Plan Phase", "/gsd:plan-phase"],
+  ["quick", "Quick Task", "/gsd:quick"],
+  ["todo", "Add Todo", "/gsd:add-todo"],
+];
+
+/**
+ * /gsd - Show GSD operations with inline keyboard and project context.
+ */
+export async function handleGsd(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  const workDir = session.currentWorkingDir;
+  const projectName = workDir.replace(/\\/g, "/").split("/").pop() || workDir;
+
+  // Parse roadmap for context
+  const phases = parseRoadmap(workDir);
+
+  // Build status summary
+  let statusText = "";
+  if (phases.length > 0) {
+    const done = phases.filter((p) => p.status === "done").length;
+    const total = phases.filter((p) => p.status !== "skipped").length;
+    const nextPhase = phases.find((p) => p.status === "pending");
+
+    statusText = `\n${done}/${total} phases complete`;
+    if (nextPhase) {
+      statusText += `\n\n<b>Next:</b> Phase ${nextPhase.number}: ${nextPhase.name}\n<i>${nextPhase.description}</i>`;
+    }
+  } else {
+    statusText = "\n<i>No ROADMAP.md found</i>";
+  }
+
+  // Build inline keyboard: 2 buttons per row
+  const buttons: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < GSD_OPERATIONS.length; i += 2) {
+    const row: { text: string; callback_data: string }[] = [];
+    row.push({
+      text: GSD_OPERATIONS[i]![1],
+      callback_data: `gsd:${GSD_OPERATIONS[i]![0]}`,
+    });
+    if (i + 1 < GSD_OPERATIONS.length) {
+      row.push({
+        text: GSD_OPERATIONS[i + 1]![1],
+        callback_data: `gsd:${GSD_OPERATIONS[i + 1]![0]}`,
+      });
+    }
+    buttons.push(row);
+  }
+
+  await ctx.reply(
+    `<b>GSD</b> — <code>${projectName}</code>${statusText}`,
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: buttons,
+      },
+    }
+  );
 }
 
 /**

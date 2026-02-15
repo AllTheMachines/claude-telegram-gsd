@@ -5,6 +5,7 @@
  */
 
 import OpenAI from "openai";
+import { createReadStream } from "fs";
 import type { Chat } from "grammy/types";
 import type { Context } from "grammy";
 import type { AuditEvent } from "./types";
@@ -15,6 +16,8 @@ import {
   TRANSCRIPTION_PROMPT,
   TRANSCRIPTION_AVAILABLE,
 } from "./config";
+
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ============== OpenAI Client ==============
 
@@ -156,7 +159,7 @@ export async function transcribeVoice(
   }
 
   try {
-    const file = Bun.file(filePath);
+    const file = createReadStream(filePath);
     const transcript = await openaiClient.audio.transcriptions.create({
       model: "gpt-4o-transcribe",
       file: file,
@@ -185,7 +188,7 @@ export function startTypingIndicator(ctx: Context): TypingController {
       } catch (error) {
         console.debug("Typing indicator failed:", error);
       }
-      await Bun.sleep(4000);
+      await sleep(4000);
     }
   };
 
@@ -227,7 +230,7 @@ export async function checkInterrupt(text: string): Promise<string> {
     console.log("! prefix - interrupting current query");
     sessionModule.session.markInterrupt();
     await sessionModule.session.stop();
-    await Bun.sleep(100);
+    await sleep(100);
     // Clear stopRequested so the new message can proceed
     sessionModule.session.clearStopRequested();
   }

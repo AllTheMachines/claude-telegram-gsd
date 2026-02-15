@@ -1,12 +1,14 @@
 /**
- * Claude Telegram Bot - TypeScript/Bun Edition
+ * Claude Telegram Bot - Node.js Edition
  *
  * Control Claude Code from your phone via Telegram.
+ * Adapted from linuz90/claude-telegram-bot (Bun/TypeScript).
  */
 
 import { Bot } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
-import { TELEGRAM_TOKEN, WORKING_DIR, ALLOWED_USERS, RESTART_FILE } from "./config";
+import { TELEGRAM_TOKEN, ALLOWED_USERS, RESTART_FILE } from "./config";
+import { session } from "./session";
 import { unlinkSync, readFileSync, existsSync } from "fs";
 import {
   handleStart,
@@ -16,6 +18,8 @@ import {
   handleResume,
   handleRestart,
   handleRetry,
+  handleProject,
+  handleGsd,
   handleText,
   handleVoice,
   handlePhoto,
@@ -58,25 +62,16 @@ bot.command("status", handleStatus);
 bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
+bot.command("project", handleProject);
+bot.command("gsd", handleGsd);
 
 // ============== Message Handlers ==============
 
-// Text messages
 bot.on("message:text", handleText);
-
-// Voice messages
 bot.on("message:voice", handleVoice);
-
-// Photo messages
 bot.on("message:photo", handlePhoto);
-
-// Document messages
 bot.on("message:document", handleDocument);
-
-// Audio messages
 bot.on("message:audio", handleAudio);
-
-// Video messages (regular videos and video notes)
 bot.on("message:video", handleVideo);
 bot.on("message:video_note", handleVideo);
 
@@ -93,15 +88,27 @@ bot.catch((err) => {
 // ============== Startup ==============
 
 console.log("=".repeat(50));
-console.log("Claude Telegram Bot - TypeScript Edition");
+console.log("Claude Telegram Bot - Node.js Edition");
 console.log("=".repeat(50));
-console.log(`Working directory: ${WORKING_DIR}`);
+console.log(`Working directory: ${session.currentWorkingDir}`);
 console.log(`Allowed users: ${ALLOWED_USERS.length}`);
 console.log("Starting bot...");
 
-// Get bot info first
+// Get bot info and register command menu
 const botInfo = await bot.api.getMe();
 console.log(`Bot started: @${botInfo.username}`);
+
+await bot.api.setMyCommands([
+  { command: "new", description: "Start a new conversation" },
+  { command: "stop", description: "Stop current query" },
+  { command: "status", description: "Show session status" },
+  { command: "resume", description: "Resume a saved session" },
+  { command: "project", description: "Switch working directory" },
+  { command: "gsd", description: "GSD workflow operations" },
+  { command: "retry", description: "Retry last message" },
+  { command: "restart", description: "Restart the bot process" },
+]);
+console.log("Command menu registered");
 
 // Check for pending restart message to update
 if (existsSync(RESTART_FILE)) {

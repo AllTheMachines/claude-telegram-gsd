@@ -2,34 +2,15 @@
  * Configuration for Claude Telegram Bot.
  *
  * All environment variables, paths, constants, and safety settings.
+ * Adapted for Node.js on Windows.
  */
 
-import { homedir } from "os";
+import "dotenv/config";
+import { homedir, tmpdir } from "os";
 import { resolve, dirname } from "path";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { execSync } from "child_process";
 import type { McpServerConfig } from "./types";
-
-// ============== Environment Setup ==============
-
-const HOME = homedir();
-
-// Ensure necessary paths are available for Claude's bash commands
-// LaunchAgents don't inherit the full shell environment
-const EXTRA_PATHS = [
-  `${HOME}/.local/bin`,
-  `${HOME}/.bun/bin`,
-  "/opt/homebrew/bin",
-  "/opt/homebrew/sbin",
-  "/usr/local/bin",
-];
-
-const currentPath = process.env.PATH || "";
-const pathParts = currentPath.split(":");
-for (const extraPath of EXTRA_PATHS) {
-  if (!pathParts.includes(extraPath)) {
-    pathParts.unshift(extraPath);
-  }
-}
-process.env.PATH = pathParts.join(":");
 
 // ============== Core Configuration ==============
 
@@ -42,40 +23,51 @@ export const ALLOWED_USERS: number[] = (
   .map((x) => parseInt(x.trim(), 10))
   .filter((x) => !isNaN(x));
 
+const HOME = homedir();
 export const WORKING_DIR = process.env.CLAUDE_WORKING_DIR || HOME;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
 // ============== Claude CLI Path ==============
 
-// Auto-detect from PATH, or use environment override
 function findClaudeCli(): string {
   const envPath = process.env.CLAUDE_CLI_PATH;
   if (envPath) return envPath;
 
-  // Try to find claude in PATH using Bun.which
-  const whichResult = Bun.which("claude");
-  if (whichResult) return whichResult;
+  // Try to find claude in PATH
+  try {
+    const result = execSync("where claude", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    const firstLine = result.trim().split(/\r?\n/)[0];
+    if (firstLine) return firstLine;
+  } catch {
+    // Not found in PATH
+  }
 
-  // Final fallback
-  return "/usr/local/bin/claude";
+  // Fallback — common Windows location
+  const npmGlobal = resolve(process.env.APPDATA || "", "npm", "claude.cmd");
+  if (existsSync(npmGlobal)) return npmGlobal;
+
+  return "claude";
 }
 
 export const CLAUDE_CLI_PATH = findClaudeCli();
 
 // ============== MCP Configuration ==============
 
-// MCP servers loaded from mcp-config.ts
 let MCP_SERVERS: Record<string, McpServerConfig> = {};
 
 try {
-  // Dynamic import of MCP config
-  const mcpConfigPath = resolve(dirname(import.meta.dir), "mcp-config.ts");
-  const mcpModule = await import(mcpConfigPath).catch(() => null);
-  if (mcpModule?.MCP_SERVERS) {
-    MCP_SERVERS = mcpModule.MCP_SERVERS;
-    console.log(
-      `Loaded ${Object.keys(MCP_SERVERS).length} MCP servers from mcp-config.ts`
-    );
+  const mcpConfigPath = resolve(
+    dirname(import.meta.dirname || "."),
+    "mcp-config.ts"
+  );
+  if (existsSync(mcpConfigPath)) {
+    const mcpModule = await import(mcpConfigPath).catch(() => null);
+    if (mcpModule?.MCP_SERVERS) {
+      MCP_SERVERS = mcpModule.MCP_SERVERS;
+      console.log(
+        `Loaded ${Object.keys(MCP_SERVERS).length} MCP servers from mcp-config.ts`
+      );
+    }
   }
 } catch {
   console.log("No mcp-config.ts found - running without MCPs");
@@ -85,13 +77,12 @@ export { MCP_SERVERS };
 
 // ============== Security Configuration ==============
 
-// Allowed directories for file operations
 const defaultAllowedPaths = [
   WORKING_DIR,
-  `${HOME}/Documents`,
-  `${HOME}/Downloads`,
-  `${HOME}/Desktop`,
-  `${HOME}/.claude`, // Claude Code data (plans, settings)
+  resolve(HOME, "Documents"),
+  resolve(HOME, "Downloads"),
+  resolve(HOME, "Desktop"),
+  resolve(HOME, ".claude"),
 ];
 
 const allowedPathsStr = process.env.ALLOWED_PATHS || "";
@@ -102,7 +93,6 @@ export const ALLOWED_PATHS: string[] = allowedPathsStr
       .filter(Boolean)
   : defaultAllowedPaths;
 
-// Build safety prompt dynamically from ALLOWED_PATHS
 function buildSafetyPrompt(allowedPaths: string[]): string {
   const pathsList = allowedPaths
     .map((p) => `   - ${p} (and subdirectories)`)
@@ -133,19 +123,20 @@ You are running via Telegram, so the user cannot easily undo mistakes. Be extra 
 
 export const SAFETY_PROMPT = buildSafetyPrompt(ALLOWED_PATHS);
 
-// Dangerous command patterns to block
 export const BLOCKED_PATTERNS = [
   "rm -rf /",
   "rm -rf ~",
   "rm -rf $HOME",
+  "rm -rf %USERPROFILE%",
   "sudo rm",
-  ":(){ :|:& };:", // Fork bomb
+  ":(){ :|:& };:",
   "> /dev/sd",
   "mkfs.",
   "dd if=",
+  "format c:",
+  "del /s /q c:",
 ];
 
-// Query timeout (3 minutes)
 export const QUERY_TIMEOUT_MS = 180_000;
 
 // ============== Voice Transcription ==============
@@ -157,12 +148,14 @@ Focus on accuracy for proper nouns, technical terms, and commands.`;
 let TRANSCRIPTION_CONTEXT = "";
 if (process.env.TRANSCRIPTION_CONTEXT_FILE) {
   try {
-    const file = Bun.file(process.env.TRANSCRIPTION_CONTEXT_FILE);
-    if (await file.exists()) {
-      TRANSCRIPTION_CONTEXT = (await file.text()).trim();
+    if (existsSync(process.env.TRANSCRIPTION_CONTEXT_FILE)) {
+      TRANSCRIPTION_CONTEXT = readFileSync(
+        process.env.TRANSCRIPTION_CONTEXT_FILE,
+        "utf-8"
+      ).trim();
     }
   } catch {
-    // File not found or unreadable — proceed without context
+    // File not found or unreadable
   }
 }
 
@@ -175,9 +168,9 @@ export const TRANSCRIPTION_AVAILABLE = !!OPENAI_API_KEY;
 // ============== Thinking Keywords ==============
 
 const thinkingKeywordsStr =
-  process.env.THINKING_KEYWORDS || "think,pensa,ragiona";
+  process.env.THINKING_KEYWORDS || "think,reason,analyze";
 const thinkingDeepKeywordsStr =
-  process.env.THINKING_DEEP_KEYWORDS || "ultrathink,think hard,pensa bene";
+  process.env.THINKING_DEEP_KEYWORDS || "ultrathink,think hard,think deeply";
 
 export const THINKING_KEYWORDS = thinkingKeywordsStr
   .split(",")
@@ -188,19 +181,19 @@ export const THINKING_DEEP_KEYWORDS = thinkingDeepKeywordsStr
 
 // ============== Media Group Settings ==============
 
-export const MEDIA_GROUP_TIMEOUT = 1000; // ms to wait for more photos in a group
+export const MEDIA_GROUP_TIMEOUT = 1000;
 
 // ============== Telegram Message Limits ==============
 
-export const TELEGRAM_MESSAGE_LIMIT = 4096; // Max characters per message
-export const TELEGRAM_SAFE_LIMIT = 4000; // Safe limit with buffer for formatting
-export const STREAMING_THROTTLE_MS = 500; // Throttle streaming updates
-export const BUTTON_LABEL_MAX_LENGTH = 30; // Max chars for inline button labels
+export const TELEGRAM_MESSAGE_LIMIT = 4096;
+export const TELEGRAM_SAFE_LIMIT = 4000;
+export const STREAMING_THROTTLE_MS = 500;
+export const BUTTON_LABEL_MAX_LENGTH = 30;
 
 // ============== Audit Logging ==============
 
 export const AUDIT_LOG_PATH =
-  process.env.AUDIT_LOG_PATH || "/tmp/claude-telegram-audit.log";
+  process.env.AUDIT_LOG_PATH || resolve(tmpdir(), "claude-telegram-audit.log");
 export const AUDIT_LOG_JSON =
   (process.env.AUDIT_LOG_JSON || "false").toLowerCase() === "true";
 
@@ -219,15 +212,16 @@ export const RATE_LIMIT_WINDOW = parseInt(
 
 // ============== File Paths ==============
 
-export const SESSION_FILE = "/tmp/claude-telegram-session.json";
-export const RESTART_FILE = "/tmp/claude-telegram-restart.json";
-export const TEMP_DIR = "/tmp/telegram-bot";
+const TMP = tmpdir();
+export const SESSION_FILE = resolve(TMP, "claude-telegram-session.json");
+export const RESTART_FILE = resolve(TMP, "claude-telegram-restart.json");
+export const TEMP_DIR = resolve(TMP, "telegram-bot");
 
 // Temp paths that are always allowed for bot operations
-export const TEMP_PATHS = ["/tmp/", "/private/tmp/", "/var/folders/"];
+export const TEMP_PATHS = [TMP, resolve(TMP)];
 
 // Ensure temp directory exists
-await Bun.write(`${TEMP_DIR}/.keep`, "");
+mkdirSync(TEMP_DIR, { recursive: true });
 
 // ============== Validation ==============
 

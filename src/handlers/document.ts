@@ -6,6 +6,17 @@
  */
 
 import type { Context } from "grammy";
+import {
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  statSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+} from "fs";
+import { resolve, join } from "path";
+import { execSync } from "child_process";
 import { session } from "../session";
 import { ALLOWED_USERS, TEMP_DIR } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
@@ -73,7 +84,7 @@ async function downloadDocument(ctx: Context): Promise<string> {
     `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`
   );
   const buffer = await response.arrayBuffer();
-  await Bun.write(docPath, buffer);
+  writeFileSync(docPath, Buffer.from(buffer));
 
   return docPath;
 }
@@ -88,21 +99,23 @@ async function extractText(
   const fileName = filePath.split("/").pop() || "";
   const extension = "." + (fileName.split(".").pop() || "").toLowerCase();
 
-  // PDF extraction using pdftotext CLI (install: brew install poppler)
+  // PDF extraction using pdftotext CLI
   if (mimeType === "application/pdf" || extension === ".pdf") {
     try {
-      const result = await Bun.$`pdftotext -layout ${filePath} -`.quiet();
-      return result.text();
+      const result = execSync(`pdftotext -layout "${filePath}" -`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return result;
     } catch (error) {
       console.error("PDF parsing failed:", error);
-      return "[PDF parsing failed - ensure pdftotext is installed: brew install poppler]";
+      return "[PDF parsing failed - ensure pdftotext (poppler) is installed]";
     }
   }
 
   // Text files
   if (TEXT_EXTENSIONS.includes(extension) || mimeType?.startsWith("text/")) {
-    const text = await Bun.file(filePath).text();
-    // Limit to 100K chars
+    const text = readFileSync(filePath, "utf-8");
     return text.slice(0, 100000);
   }
 
@@ -138,12 +151,25 @@ async function extractArchive(
 ): Promise<string> {
   const ext = getArchiveExtension(fileName);
   const extractDir = `${TEMP_DIR}/archive_${Date.now()}`;
-  await Bun.$`mkdir -p ${extractDir}`;
+  mkdirSync(extractDir, { recursive: true });
 
   if (ext === ".zip") {
-    await Bun.$`unzip -q -o ${archivePath} -d ${extractDir}`.quiet();
+    // Use tar on Windows 10+ (supports ZIP) or PowerShell fallback
+    try {
+      execSync(`tar -xf "${archivePath}" -C "${extractDir}"`, {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // Fallback to PowerShell Expand-Archive
+      execSync(
+        `powershell.exe -NoProfile -Command "Expand-Archive -Force -Path '${archivePath}' -DestinationPath '${extractDir}'"`,
+        { stdio: ["pipe", "pipe", "pipe"] }
+      );
+    }
   } else if (ext === ".tar" || ext === ".tar.gz" || ext === ".tgz") {
-    await Bun.$`tar -xf ${archivePath} -C ${extractDir}`.quiet();
+    execSync(`tar -xf "${archivePath}" -C "${extractDir}"`, {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
   } else {
     throw new Error(`Unknown archive type: ${ext}`);
   }
@@ -154,12 +180,28 @@ async function extractArchive(
 /**
  * Build a file tree from a directory.
  */
-async function buildFileTree(dir: string): Promise<string[]> {
-  const entries = await Array.fromAsync(
-    new Bun.Glob("**/*").scan({ cwd: dir, dot: false })
-  );
+function buildFileTreeSync(dir: string): string[] {
+  const entries: string[] = [];
+  function walk(current: string, prefix: string) {
+    let items: string[];
+    try {
+      items = readdirSync(current, { withFileTypes: true }) as any;
+    } catch {
+      return;
+    }
+    for (const item of items) {
+      const relPath = prefix ? `${prefix}/${item.name}` : item.name;
+      if ((item as any).isDirectory()) {
+        walk(join(current, item.name), relPath);
+      } else {
+        entries.push(relPath);
+        if (entries.length >= 100) return;
+      }
+    }
+  }
+  walk(dir, "");
   entries.sort();
-  return entries.slice(0, 100); // Limit to 100 files
+  return entries.slice(0, 100);
 }
 
 /**
@@ -171,29 +213,30 @@ async function extractArchiveContent(
   tree: string[];
   contents: Array<{ name: string; content: string }>;
 }> {
-  const tree = await buildFileTree(extractDir);
+  const tree = buildFileTreeSync(extractDir);
   const contents: Array<{ name: string; content: string }> = [];
   let totalSize = 0;
 
   for (const relativePath of tree) {
-    const fullPath = `${extractDir}/${relativePath}`;
-    const stat = await Bun.file(fullPath).exists();
-    if (!stat) continue;
+    const fullPath = join(extractDir, relativePath);
+    if (!existsSync(fullPath)) continue;
 
-    // Check if it's a directory
-    const fileInfo = Bun.file(fullPath);
-    const size = fileInfo.size;
+    let size: number;
+    try {
+      size = statSync(fullPath).size;
+    } catch {
+      continue;
+    }
     if (size === 0) continue;
 
     const ext = "." + (relativePath.split(".").pop() || "").toLowerCase();
     if (!TEXT_EXTENSIONS.includes(ext)) continue;
 
-    // Skip large files
     if (size > 100000) continue;
 
     try {
-      const text = await fileInfo.text();
-      const truncated = text.slice(0, 10000); // 10K per file max
+      const text = readFileSync(fullPath, "utf-8");
+      const truncated = text.slice(0, 10000);
       if (totalSize + truncated.length > MAX_ARCHIVE_CONTENT) break;
       contents.push({ name: relativePath, content: truncated });
       totalSize += truncated.length;
@@ -253,7 +296,7 @@ async function processArchive(
 
     // Set conversation title (if new session)
     if (!session.isActive) {
-      const rawTitle = caption || `[Archivio: ${fileName}]`;
+      const rawTitle = caption || `[Archive: ${fileName}]`;
       const title =
         rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
       session.conversationTitle = title;
@@ -281,7 +324,7 @@ async function processArchive(
     );
 
     // Cleanup
-    await Bun.$`rm -rf ${extractDir}`.quiet();
+    rmSync(extractDir, { recursive: true, force: true });
 
     // Delete status message
     try {
@@ -338,8 +381,8 @@ async function processDocuments(
 
   // Set conversation title (if new session)
   if (!session.isActive) {
-    const docName = documents[0]?.name || "[Documento]";
-    const rawTitle = caption || `[Documento: ${docName}]`;
+    const docName = documents[0]?.name || "[Document]";
+    const rawTitle = caption || `[Document: ${docName}]`;
     const title =
       rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
     session.conversationTitle = title;

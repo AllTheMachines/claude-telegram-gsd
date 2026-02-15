@@ -7,6 +7,9 @@
 import type { Context } from "grammy";
 import type { Message } from "grammy/types";
 import { InlineKeyboard } from "grammy";
+import { readdirSync, readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { resolve } from "path";
 import type { StatusCallback } from "../types";
 import { convertMarkdownToHtml, escapeHtml } from "../formatting";
 import {
@@ -44,14 +47,16 @@ export async function checkPendingAskUserRequests(
   ctx: Context,
   chatId: number
 ): Promise<boolean> {
-  const glob = new Bun.Glob("ask-user-*.json");
+  const tmp = tmpdir();
   let buttonsSent = false;
+  const files = readdirSync(tmp).filter(
+    (f) => f.startsWith("ask-user-") && f.endsWith(".json")
+  );
 
-  for await (const filename of glob.scan({ cwd: "/tmp", absolute: false })) {
-    const filepath = `/tmp/${filename}`;
+  for (const filename of files) {
+    const filepath = resolve(tmp, filename);
     try {
-      const file = Bun.file(filepath);
-      const text = await file.text();
+      const text = readFileSync(filepath, "utf-8");
       const data = JSON.parse(text);
 
       // Only process pending requests for this chat
@@ -69,7 +74,7 @@ export async function checkPendingAskUserRequests(
 
         // Mark as sent
         data.status = "sent";
-        await Bun.write(filepath, JSON.stringify(data));
+        writeFileSync(filepath, JSON.stringify(data));
       }
     } catch (error) {
       console.warn(`Failed to process ask-user file ${filepath}:`, error);
@@ -85,6 +90,7 @@ export async function checkPendingAskUserRequests(
 export class StreamingState {
   textMessages = new Map<number, Message>(); // segment_id -> telegram message
   toolMessages: Message[] = []; // ephemeral tool status messages
+  statusMsg: Message | null = null; // single reusable status message (thinking/tools)
   lastEditTimes = new Map<number, number>(); // segment_id -> last edit time
   lastContent = new Map<number, string>(); // segment_id -> last sent content
 }
@@ -144,32 +150,80 @@ export function createStatusCallback(
   return async (statusType: string, content: string, segmentId?: number) => {
     try {
       if (statusType === "thinking") {
-        // Show thinking inline, compact (first 500 chars)
+        // Show thinking in the single status message (compact)
         const preview =
-          content.length > 500 ? content.slice(0, 500) + "..." : content;
+          content.length > 300 ? content.slice(0, 300) + "..." : content;
         const escaped = escapeHtml(preview);
-        const thinkingMsg = await ctx.reply(`🧠 <i>${escaped}</i>`, {
-          parse_mode: "HTML",
-        });
-        state.toolMessages.push(thinkingMsg);
+        const text = `🧠 <i>${escaped}</i>`;
+
+        if (state.statusMsg) {
+          try {
+            await ctx.api.editMessageText(
+              state.statusMsg.chat.id,
+              state.statusMsg.message_id,
+              text,
+              { parse_mode: "HTML" }
+            );
+          } catch {
+            // Edit failed — send new
+            state.statusMsg = await ctx.reply(text, {
+              parse_mode: "HTML",
+              disable_notification: true,
+            });
+            state.toolMessages.push(state.statusMsg);
+          }
+        } else {
+          state.statusMsg = await ctx.reply(text, {
+            parse_mode: "HTML",
+            disable_notification: true,
+          });
+          state.toolMessages.push(state.statusMsg);
+        }
       } else if (statusType === "tool") {
-        const toolMsg = await ctx.reply(content, { parse_mode: "HTML" });
-        state.toolMessages.push(toolMsg);
+        // Edit the single status message with tool info
+        if (state.statusMsg) {
+          try {
+            await ctx.api.editMessageText(
+              state.statusMsg.chat.id,
+              state.statusMsg.message_id,
+              content,
+              { parse_mode: "HTML" }
+            );
+          } catch {
+            // Edit failed — send new
+            state.statusMsg = await ctx.reply(content, {
+              parse_mode: "HTML",
+              disable_notification: true,
+            });
+            state.toolMessages.push(state.statusMsg);
+          }
+        } else {
+          state.statusMsg = await ctx.reply(content, {
+            parse_mode: "HTML",
+            disable_notification: true,
+          });
+          state.toolMessages.push(state.statusMsg);
+        }
       } else if (statusType === "text" && segmentId !== undefined) {
         const now = Date.now();
         const lastEdit = state.lastEditTimes.get(segmentId) || 0;
 
         if (!state.textMessages.has(segmentId)) {
-          // New segment - create message
+          // New segment - create message (silent — final segment_end will notify)
           const formatted = formatWithinLimit(content);
           try {
-            const msg = await ctx.reply(formatted, { parse_mode: "HTML" });
+            const msg = await ctx.reply(formatted, {
+              parse_mode: "HTML",
+              disable_notification: true,
+            });
             state.textMessages.set(segmentId, msg);
             state.lastContent.set(segmentId, formatted);
           } catch (htmlError) {
             // HTML parse failed, fall back to plain text
             console.debug("HTML reply failed, using plain text:", htmlError);
-            const msg = await ctx.reply(formatted);
+            const msg = await ctx.reply(formatted, {
+              disable_notification: true,
+            });
             state.textMessages.set(segmentId, msg);
             state.lastContent.set(segmentId, formatted);
           }
@@ -216,47 +270,65 @@ export function createStatusCallback(
           state.lastEditTimes.set(segmentId, now);
         }
       } else if (statusType === "segment_end" && segmentId !== undefined) {
-        if (state.textMessages.has(segmentId) && content) {
-          const msg = state.textMessages.get(segmentId)!;
+        if (content) {
           const formatted = convertMarkdownToHtml(content);
 
-          // Skip if content unchanged
-          if (formatted === state.lastContent.get(segmentId)) {
-            return;
-          }
-
-          if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
-            try {
-              await ctx.api.editMessageText(
-                msg.chat.id,
-                msg.message_id,
-                formatted,
-                {
-                  parse_mode: "HTML",
-                }
-              );
-            } catch (error) {
-              const errorStr = String(error);
-              if (errorStr.includes("MESSAGE_TOO_LONG")) {
-                // HTML overhead pushed it over - delete and chunk
+          if (!state.textMessages.has(segmentId)) {
+            // No message was created during streaming (short response) - send new
+            if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
+              try {
+                await ctx.reply(formatted, { parse_mode: "HTML" });
+              } catch {
                 try {
-                  await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
-                } catch (delError) {
-                  console.debug("Failed to delete for chunking:", delError);
+                  await ctx.reply(formatted);
+                } catch (plainError) {
+                  console.debug("Failed to send final message:", plainError);
                 }
-                await sendChunkedMessages(ctx, formatted);
-              } else {
-                console.debug("Failed to edit final message:", error);
               }
+            } else {
+              await sendChunkedMessages(ctx, formatted);
             }
           } else {
-            // Too long - delete and split
-            try {
-              await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
-            } catch (error) {
-              console.debug("Failed to delete message for splitting:", error);
+            const msg = state.textMessages.get(segmentId)!;
+
+            // Skip if content unchanged
+            if (formatted === state.lastContent.get(segmentId)) {
+              return;
             }
-            await sendChunkedMessages(ctx, formatted);
+
+            if (formatted.length <= TELEGRAM_MESSAGE_LIMIT) {
+              try {
+                await ctx.api.editMessageText(
+                  msg.chat.id,
+                  msg.message_id,
+                  formatted,
+                  {
+                    parse_mode: "HTML",
+                  }
+                );
+              } catch (error) {
+                const errorStr = String(error);
+                if (errorStr.includes("MESSAGE_TOO_LONG")) {
+                  // HTML overhead pushed it over - delete and chunk
+                  try {
+                    await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
+                  } catch (delError) {
+                    console.debug("Failed to delete for chunking:", delError);
+                  }
+                  await sendChunkedMessages(ctx, formatted);
+                } else {
+                  console.debug("Failed to edit final message:", error);
+                }
+              }
+            } else {
+              // Too long - delete and split
+              try {
+                await ctx.api.deleteMessage(msg.chat.id, msg.message_id);
+              } catch (error) {
+                console.debug("Failed to delete message for splitting:", error);
+              }
+              await sendChunkedMessages(ctx, formatted);
+            }
           }
         }
       } else if (statusType === "done") {

@@ -5,6 +5,7 @@
  */
 
 import type { Context } from "grammy";
+import { writeFileSync } from "fs";
 import { session } from "../session";
 import { ALLOWED_USERS, TEMP_DIR } from "../config";
 import { isAuthorized, rateLimiter } from "../security";
@@ -36,7 +37,7 @@ async function downloadVideo(ctx: Context): Promise<string> {
     `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`
   );
   const buffer = await response.arrayBuffer();
-  await Bun.write(videoPath, buffer);
+  writeFileSync(videoPath, Buffer.from(buffer));
 
   return videoPath;
 }

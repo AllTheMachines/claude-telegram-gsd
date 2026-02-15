@@ -1,31 +1,25 @@
 /**
  * Session management for Claude Telegram Bot.
  *
- * ClaudeSession class manages Claude Code sessions using the Agent SDK V1.
- * V1 supports full options (cwd, mcpServers, settingSources, etc.)
+ * ClaudeSession class manages Claude Code sessions using the CLI subprocess.
+ * Spawns `claude -p` with `--output-format stream-json` for streaming responses.
+ * No API costs — everything runs on the user's Claude MAX subscription via CLI.
  */
 
-import {
-  query,
-  type Options,
-  type SDKMessage,
-} from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync } from "fs";
+import { spawn, execSync, type ChildProcess } from "child_process";
+import { createInterface } from "readline";
+import { readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import type { Context } from "grammy";
+
 import {
   ALLOWED_PATHS,
-  MCP_SERVERS,
-  SAFETY_PROMPT,
+  CLAUDE_CLI_PATH,
   SESSION_FILE,
   STREAMING_THROTTLE_MS,
-  TEMP_PATHS,
-  THINKING_DEEP_KEYWORDS,
-  THINKING_KEYWORDS,
   WORKING_DIR,
 } from "./config";
 import { formatToolStatus } from "./formatting";
 import { checkPendingAskUserRequests } from "./handlers/streaming";
-import { checkCommandSafety, isPathAllowed } from "./security";
 import type {
   SavedSession,
   SessionHistory,
@@ -34,44 +28,49 @@ import type {
 } from "./types";
 
 /**
- * Determine thinking token budget based on message keywords.
+ * Kill a process tree. On Windows, `taskkill /T` kills child processes too
+ * (needed because shell:true spawns cmd.exe which spawns the actual CLI).
+ * On Unix, tries graceful SIGTERM first, then SIGKILL after timeout.
  */
-function getThinkingLevel(message: string): number {
-  const msgLower = message.toLowerCase();
-
-  // Check deep thinking triggers first (more specific)
-  if (THINKING_DEEP_KEYWORDS.some((k) => msgLower.includes(k))) {
-    return 50000;
-  }
-
-  // Check normal thinking triggers
-  if (THINKING_KEYWORDS.some((k) => msgLower.includes(k))) {
-    return 10000;
-  }
-
-  // Default: no thinking
-  return 0;
-}
-
-/**
- * Extract text content from SDK message.
- */
-function getTextFromMessage(msg: SDKMessage): string | null {
-  if (msg.type !== "assistant") return null;
-
-  const textParts: string[] = [];
-  for (const block of msg.message.content) {
-    if (block.type === "text") {
-      textParts.push(block.text);
+function killProcessTree(pid: number): void {
+  try {
+    if (process.platform === "win32") {
+      // Windows: taskkill /T /F is the only reliable method
+      execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" });
+    } else {
+      // Unix: graceful SIGTERM, then force SIGKILL after 5s
+      process.kill(-pid, "SIGTERM");
+      setTimeout(() => {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          // Already dead
+        }
+      }, 5000);
     }
+  } catch {
+    // Process might already be dead
   }
-  return textParts.length > 0 ? textParts.join("") : null;
 }
 
 /**
- * Manages Claude Code sessions using the Agent SDK V1.
+ * Detect "prompt too long" / context limit errors from CLI output.
  */
-// Maximum number of sessions to keep in history
+const PROMPT_TOO_LONG_PATTERNS = [
+  /input length and max_tokens exceed context limit/i,
+  /exceed context limit/i,
+  /context limit.*exceeded/i,
+  /prompt.*too.*long/i,
+  /conversation is too long/i,
+];
+
+function isPromptTooLong(text: string): boolean {
+  return PROMPT_TOO_LONG_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * Manages Claude Code sessions using the CLI subprocess.
+ */
 const MAX_SESSIONS = 5;
 
 class ClaudeSession {
@@ -85,12 +84,26 @@ class ClaudeSession {
   lastUsage: TokenUsage | null = null;
   lastMessage: string | null = null;
   conversationTitle: string | null = null;
+  contextPercent: number | null = null;
+  private _workingDir: string = WORKING_DIR;
 
-  private abortController: AbortController | null = null;
+  private childProcess: ChildProcess | null = null;
   private isQueryRunning = false;
   private stopRequested = false;
   private _isProcessing = false;
   private _wasInterruptedByNewMessage = false;
+
+  get currentWorkingDir(): string {
+    return this._workingDir;
+  }
+
+  setWorkingDir(path: string): void {
+    if (!existsSync(path)) {
+      throw new Error(`Directory does not exist: ${path}`);
+    }
+    this._workingDir = path;
+    console.log(`Working directory changed to: ${path}`);
+  }
 
   get isActive(): boolean {
     return this.sessionId !== null;
@@ -108,7 +121,6 @@ class ClaudeSession {
     const was = this._wasInterruptedByNewMessage;
     this._wasInterruptedByNewMessage = false;
     if (was) {
-      // Clear stopRequested so the new message can proceed
       this.stopRequested = false;
     }
     return was;
@@ -140,19 +152,17 @@ class ClaudeSession {
   }
 
   /**
-   * Stop the currently running query or mark for cancellation.
-   * Returns: "stopped" if query was aborted, "pending" if processing will be cancelled, false if nothing running
+   * Stop the currently running query by killing the CLI subprocess.
+   * Returns: "stopped" if process was killed, "pending" if will be cancelled, false if nothing running
    */
   async stop(): Promise<"stopped" | "pending" | false> {
-    // If a query is actively running, abort it
-    if (this.isQueryRunning && this.abortController) {
+    if (this.isQueryRunning && this.childProcess?.pid) {
       this.stopRequested = true;
-      this.abortController.abort();
-      console.log("Stop requested - aborting current query");
+      killProcessTree(this.childProcess.pid);
+      console.log("Stop requested - killing CLI process");
       return "stopped";
     }
 
-    // If processing but query not started yet
     if (this._isProcessing) {
       this.stopRequested = true;
       console.log("Stop requested - will cancel before query starts");
@@ -163,7 +173,10 @@ class ClaudeSession {
   }
 
   /**
-   * Send a message to Claude with streaming updates via callback.
+   * Send a message to Claude via CLI subprocess with streaming updates.
+   *
+   * Spawns `claude -p --output-format stream-json` and parses NDJSON events.
+   * Prompt is piped via stdin to avoid command-line escaping issues.
    *
    * @param ctx - grammY context for ask_user button display
    */
@@ -181,10 +194,6 @@ class ClaudeSession {
     }
 
     const isNewSession = !this.isActive;
-    const thinkingTokens = getThinkingLevel(message);
-    const thinkingLabel =
-      { 0: "off", 10000: "normal", 50000: "deep" }[thinkingTokens] ||
-      String(thinkingTokens);
 
     // Inject current date/time at session start so Claude doesn't need to call a tool for it
     let messageToSend = message;
@@ -205,35 +214,42 @@ class ClaudeSession {
       messageToSend = datePrefix + message;
     }
 
-    // Build SDK V1 options - supports all features
-    const options: Options = {
-      model: "claude-sonnet-4-5",
-      cwd: WORKING_DIR,
-      settingSources: ["user", "project"],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      systemPrompt: SAFETY_PROMPT,
-      mcpServers: MCP_SERVERS,
-      maxThinkingTokens: thinkingTokens,
-      additionalDirectories: ALLOWED_PATHS,
-      resume: this.sessionId || undefined,
-    };
+    // Build CLI args — prompt goes to stdin, not on command line
+    const args: string[] = [
+      "-p",
+      "--verbose",
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--dangerously-skip-permissions",
+    ];
 
-    // Add Claude Code executable path if set (required for standalone builds)
-    if (process.env.CLAUDE_CODE_PATH) {
-      options.pathToClaudeCodeExecutable = process.env.CLAUDE_CODE_PATH;
+    // Additional directories
+    if (ALLOWED_PATHS.length > 0) {
+      args.push("--add-dir", ...ALLOWED_PATHS);
     }
 
-    if (this.sessionId && !isNewSession) {
-      console.log(
-        `RESUMING session ${this.sessionId.slice(
-          0,
-          8
-        )}... (thinking=${thinkingLabel})`
-      );
+    // Resume existing session
+    if (this.sessionId) {
+      args.push("--resume", this.sessionId);
+    }
+
+    // Optional model override (env var)
+    const model = process.env.CLAUDE_MODEL;
+    if (model) {
+      args.push("--model", model);
+    }
+
+    // Optional system prompt (env var)
+    const systemPrompt = process.env.CLAUDE_SYSTEM_PROMPT;
+    if (systemPrompt) {
+      args.push("--append-system-prompt", systemPrompt);
+    }
+
+    if (isNewSession) {
+      console.log("STARTING new Claude CLI session");
     } else {
-      console.log(`STARTING new Claude session (thinking=${thinkingLabel})`);
-      this.sessionId = null;
+      console.log(`RESUMING session ${this.sessionId!.slice(0, 8)}...`);
     }
 
     // Check if stop was requested during processing phase
@@ -245,8 +261,21 @@ class ClaudeSession {
       throw new Error("Query cancelled");
     }
 
-    // Create abort controller for cancellation
-    this.abortController = new AbortController();
+    // Spawn CLI process
+    const env = { ...process.env };
+    delete env.CLAUDECODE; // Prevent "nested session" error
+
+    this.childProcess = spawn(CLAUDE_CLI_PATH, args, {
+      cwd: this._workingDir,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: process.platform === "win32",
+    });
+
+    // Pipe prompt via stdin (avoids command-line escaping issues on Windows)
+    this.childProcess.stdin!.write(messageToSend);
+    this.childProcess.stdin!.end();
+
     this.isQueryRunning = true;
     this.stopRequested = false;
     this.queryStarted = new Date();
@@ -257,143 +286,154 @@ class ClaudeSession {
     let currentSegmentId = 0;
     let currentSegmentText = "";
     let lastTextUpdate = 0;
-    let queryCompleted = false;
     let askUserTriggered = false;
+    let resultText: string | null = null;
+    let promptTooLong = false;
+
+    // Per-message tracking for partial message deduplication
+    let currentMsgId: string | null = null;
+    let processedBlockLengths: number[] = [];
+    const processedToolIds = new Set<string>();
+
+    // Collect stderr for error reporting
+    const stderrChunks: string[] = [];
+    this.childProcess.stderr!.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      stderrChunks.push(text);
+      if (text.trim()) {
+        console.error(`CLI stderr: ${text.trim()}`);
+      }
+      if (isPromptTooLong(text)) {
+        promptTooLong = true;
+      }
+    });
 
     try {
-      // Use V1 query() API - supports all options including cwd, mcpServers, etc.
-      const queryInstance = query({
-        prompt: messageToSend,
-        options: {
-          ...options,
-          abortController: this.abortController,
-        },
-      });
+      const rl = createInterface({ input: this.childProcess.stdout! });
 
-      // Process streaming response
-      for await (const event of queryInstance) {
+      for await (const line of rl) {
         // Check for abort
         if (this.stopRequested) {
           console.log("Query aborted by user");
           break;
         }
 
-        // Capture session_id from first message
-        if (!this.sessionId && event.session_id) {
+        // Parse NDJSON line
+        let event: any;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue; // Skip non-JSON lines (e.g. debug output)
+        }
+
+        // Capture session_id from the first event that has one
+        if (event.session_id && !this.sessionId) {
           this.sessionId = event.session_id;
           console.log(`GOT session_id: ${this.sessionId!.slice(0, 8)}...`);
           this.saveSession();
         }
 
-        // Handle different message types
-        if (event.type === "assistant") {
-          for (const block of event.message.content) {
-            // Thinking blocks
-            if (block.type === "thinking") {
-              const thinkingText = block.thinking;
-              if (thinkingText) {
-                console.log(`THINKING BLOCK: ${thinkingText.slice(0, 100)}...`);
-                await statusCallback("thinking", thinkingText);
+        // ── Assistant messages (text, tools, thinking) ──
+        if (event.type === "assistant" && event.message?.content) {
+          const msgId = event.message.id;
+
+          // New message ID = new assistant turn (reset per-message tracking)
+          if (msgId !== currentMsgId) {
+            currentMsgId = msgId;
+            processedBlockLengths = [];
+          }
+
+          const content = event.message.content as any[];
+
+          for (let i = 0; i < content.length; i++) {
+            const block = content[i];
+            const prevLen = processedBlockLengths[i] || 0;
+
+            // ── Thinking blocks ──
+            if (block.type === "thinking" && block.thinking) {
+              const thinking = block.thinking as string;
+              if (thinking.length > prevLen) {
+                processedBlockLengths[i] = thinking.length;
+                console.log(`THINKING: ${thinking.slice(0, 100)}...`);
+                await statusCallback("thinking", thinking);
               }
             }
 
-            // Tool use blocks
-            if (block.type === "tool_use") {
-              const toolName = block.name;
-              const toolInput = block.input as Record<string, unknown>;
+            // ── Text blocks ──
+            if (block.type === "text" && block.text) {
+              const text = block.text as string;
+              if (text.length > prevLen) {
+                const delta = text.slice(prevLen);
+                processedBlockLengths[i] = text.length;
 
-              // Safety check for Bash commands
-              if (toolName === "Bash") {
-                const command = String(toolInput.command || "");
-                const [isSafe, reason] = checkCommandSafety(command);
-                if (!isSafe) {
-                  console.warn(`BLOCKED: ${reason}`);
-                  await statusCallback("tool", `BLOCKED: ${reason}`);
-                  throw new Error(`Unsafe command blocked: ${reason}`);
-                }
-              }
+                responseParts.push(delta);
+                currentSegmentText += delta;
 
-              // Safety check for file operations
-              if (["Read", "Write", "Edit"].includes(toolName)) {
-                const filePath = String(toolInput.file_path || "");
-                if (filePath) {
-                  // Allow reads from temp paths and .claude directories
-                  const isTmpRead =
-                    toolName === "Read" &&
-                    (TEMP_PATHS.some((p) => filePath.startsWith(p)) ||
-                      filePath.includes("/.claude/"));
-
-                  if (!isTmpRead && !isPathAllowed(filePath)) {
-                    console.warn(
-                      `BLOCKED: File access outside allowed paths: ${filePath}`
-                    );
-                    await statusCallback("tool", `Access denied: ${filePath}`);
-                    throw new Error(`File access blocked: ${filePath}`);
-                  }
-                }
-              }
-
-              // Segment ends when tool starts
-              if (currentSegmentText) {
-                await statusCallback(
-                  "segment_end",
-                  currentSegmentText,
-                  currentSegmentId
-                );
-                currentSegmentId++;
-                currentSegmentText = "";
-              }
-
-              // Format and show tool status
-              const toolDisplay = formatToolStatus(toolName, toolInput);
-              this.currentTool = toolDisplay;
-              this.lastTool = toolDisplay;
-              console.log(`Tool: ${toolDisplay}`);
-
-              // Don't show tool status for ask_user - the buttons are self-explanatory
-              if (!toolName.startsWith("mcp__ask-user")) {
-                await statusCallback("tool", toolDisplay);
-              }
-
-              // Check for pending ask_user requests after ask-user MCP tool
-              if (toolName.startsWith("mcp__ask-user") && ctx && chatId) {
-                // Small delay to let MCP server write the file
-                await new Promise((resolve) => setTimeout(resolve, 200));
-
-                // Retry a few times in case of timing issues
-                for (let attempt = 0; attempt < 3; attempt++) {
-                  const buttonsSent = await checkPendingAskUserRequests(
-                    ctx,
-                    chatId
+                // Stream text updates (throttled)
+                const now = Date.now();
+                if (
+                  now - lastTextUpdate > STREAMING_THROTTLE_MS &&
+                  currentSegmentText.length > 20
+                ) {
+                  await statusCallback(
+                    "text",
+                    currentSegmentText,
+                    currentSegmentId
                   );
-                  if (buttonsSent) {
-                    askUserTriggered = true;
-                    break;
-                  }
-                  if (attempt < 2) {
-                    await new Promise((resolve) => setTimeout(resolve, 100));
-                  }
+                  lastTextUpdate = now;
                 }
               }
             }
 
-            // Text content
-            if (block.type === "text") {
-              responseParts.push(block.text);
-              currentSegmentText += block.text;
+            // ── Tool use blocks ──
+            if (block.type === "tool_use" && block.id) {
+              if (!processedToolIds.has(block.id)) {
+                processedToolIds.add(block.id);
+                processedBlockLengths[i] = 1; // Mark as processed
 
-              // Stream text updates (throttled)
-              const now = Date.now();
-              if (
-                now - lastTextUpdate > STREAMING_THROTTLE_MS &&
-                currentSegmentText.length > 20
-              ) {
-                await statusCallback(
-                  "text",
-                  currentSegmentText,
-                  currentSegmentId
-                );
-                lastTextUpdate = now;
+                // End current text segment
+                if (currentSegmentText) {
+                  await statusCallback(
+                    "segment_end",
+                    currentSegmentText,
+                    currentSegmentId
+                  );
+                  currentSegmentId++;
+                  currentSegmentText = "";
+                }
+
+                // Format and show tool status
+                const toolInput = (block.input || {}) as Record<
+                  string,
+                  unknown
+                >;
+                const toolDisplay = formatToolStatus(block.name, toolInput);
+                this.currentTool = toolDisplay;
+                this.lastTool = toolDisplay;
+                console.log(`Tool: ${toolDisplay}`);
+
+                // Don't show tool status for ask_user - the buttons are self-explanatory
+                if (!block.name.startsWith("mcp__ask-user")) {
+                  await statusCallback("tool", toolDisplay);
+                }
+
+                // Check for pending ask_user requests after ask-user MCP tool
+                if (block.name.startsWith("mcp__ask-user") && ctx && chatId) {
+                  await new Promise((r) => setTimeout(r, 200));
+                  for (let attempt = 0; attempt < 3; attempt++) {
+                    const buttonsSent = await checkPendingAskUserRequests(
+                      ctx,
+                      chatId
+                    );
+                    if (buttonsSent) {
+                      askUserTriggered = true;
+                      break;
+                    }
+                    if (attempt < 2) {
+                      await new Promise((r) => setTimeout(r, 100));
+                    }
+                  }
+                }
               }
             }
           }
@@ -404,14 +444,21 @@ class ClaudeSession {
           }
         }
 
-        // Result message
+        // ── Result event — query complete ──
         if (event.type === "result") {
           console.log("Response complete");
-          queryCompleted = true;
+          resultText = event.result || null;
 
-          // Capture usage if available
-          if ("usage" in event && event.usage) {
-            this.lastUsage = event.usage as TokenUsage;
+          // Capture usage
+          if (event.usage) {
+            this.lastUsage = {
+              input_tokens: event.usage.input_tokens || 0,
+              output_tokens: event.usage.output_tokens || 0,
+              cache_read_input_tokens:
+                event.usage.cache_read_input_tokens || 0,
+              cache_creation_input_tokens:
+                event.usage.cache_creation_input_tokens || 0,
+            };
             const u = this.lastUsage;
             console.log(
               `Usage: in=${u.input_tokens} out=${u.output_tokens} cache_read=${
@@ -419,29 +466,81 @@ class ClaudeSession {
               } cache_create=${u.cache_creation_input_tokens || 0}`
             );
           }
+
+          // Calculate context window percentage from modelUsage
+          if (event.modelUsage) {
+            const models = Object.values(event.modelUsage) as any[];
+            if (models.length > 0) {
+              const m = models[0];
+              const totalTokens =
+                (m.inputTokens || 0) +
+                (m.outputTokens || 0) +
+                (m.cacheReadInputTokens || 0) +
+                (m.cacheCreationInputTokens || 0);
+              const contextWindow = m.contextWindow || 200000;
+              this.contextPercent = Math.round(
+                (totalTokens / contextWindow) * 100
+              );
+              console.log(
+                `Context: ${this.contextPercent}% (${totalTokens}/${contextWindow})`
+              );
+            }
+          }
+
+          // Check for prompt-too-long in result text
+          if (event.result && isPromptTooLong(event.result)) {
+            promptTooLong = true;
+          }
+
+          // Check for error result
+          if (event.is_error || event.subtype === "error") {
+            const errorMsg = event.error || event.result || "Unknown CLI error";
+            if (isPromptTooLong(errorMsg)) {
+              promptTooLong = true;
+            }
+            throw new Error(`CLI error: ${errorMsg}`);
+          }
         }
       }
 
-      // V1 query completes automatically when the generator ends
+      // Wait for process to close (if not already)
+      await new Promise<void>((resolve) => {
+        if (!this.childProcess || this.childProcess.exitCode !== null) {
+          resolve();
+        } else {
+          this.childProcess.on("close", () => resolve());
+        }
+      });
+
+      // Check exit code — non-zero means error (unless user-initiated stop)
+      const exitCode = this.childProcess?.exitCode;
+      if (
+        exitCode &&
+        exitCode !== 0 &&
+        !this.stopRequested &&
+        !askUserTriggered
+      ) {
+        const stderr = stderrChunks.join("");
+        throw new Error(
+          `exited with code ${exitCode}: ${stderr.slice(0, 200)}`
+        );
+      }
     } catch (error) {
       const errorStr = String(error).toLowerCase();
       const isCleanupError =
         errorStr.includes("cancel") || errorStr.includes("abort");
 
-      if (
-        isCleanupError &&
-        (queryCompleted || askUserTriggered || this.stopRequested)
-      ) {
-        console.warn(`Suppressed post-completion error: ${error}`);
+      if (isCleanupError && (this.stopRequested || askUserTriggered)) {
+        console.warn(`Suppressed post-stop error: ${error}`);
       } else {
-        console.error(`Error in query: ${error}`);
+        console.error(`Error in CLI query: ${error}`);
         this.lastError = String(error).slice(0, 100);
         this.lastErrorTime = new Date();
         throw error;
       }
     } finally {
       this.isQueryRunning = false;
-      this.abortController = null;
+      this.childProcess = null;
       this.queryStarted = null;
       this.currentTool = null;
     }
@@ -449,6 +548,14 @@ class ClaudeSession {
     this.lastActivity = new Date();
     this.lastError = null;
     this.lastErrorTime = null;
+
+    // Auto-clear session on prompt-too-long
+    if (promptTooLong) {
+      console.log("Prompt too long detected - auto-clearing session");
+      await this.kill();
+      await statusCallback("done", "");
+      return "⚠️ Context limit reached — session auto-cleared. Send a new message to start fresh.";
+    }
 
     // If ask_user was triggered, return early - user will respond via button
     if (askUserTriggered) {
@@ -458,12 +565,17 @@ class ClaudeSession {
 
     // Emit final segment
     if (currentSegmentText) {
-      await statusCallback("segment_end", currentSegmentText, currentSegmentId);
+      await statusCallback(
+        "segment_end",
+        currentSegmentText,
+        currentSegmentId
+      );
     }
 
     await statusCallback("done", "");
 
-    return responseParts.join("") || "No response from Claude.";
+    // Prefer result text from CLI (most reliable), fall back to collected parts
+    return resultText || responseParts.join("") || "No response from Claude.";
   }
 
   /**
@@ -491,8 +603,8 @@ class ClaudeSession {
       const newSession: SavedSession = {
         session_id: this.sessionId,
         saved_at: new Date().toISOString(),
-        working_dir: WORKING_DIR,
-        title: this.conversationTitle || "Sessione senza titolo",
+        working_dir: this._workingDir,
+        title: this.conversationTitle || "Untitled session",
       };
 
       // Remove any existing entry with same session_id (update in place)
@@ -510,7 +622,7 @@ class ClaudeSession {
       history.sessions = history.sessions.slice(0, MAX_SESSIONS);
 
       // Save
-      Bun.write(SESSION_FILE, JSON.stringify(history, null, 2));
+      writeFileSync(SESSION_FILE, JSON.stringify(history, null, 2));
       console.log(`Session saved to ${SESSION_FILE}`);
     } catch (error) {
       console.warn(`Failed to save session: ${error}`);
@@ -522,8 +634,11 @@ class ClaudeSession {
    */
   private loadSessionHistory(): SessionHistory {
     try {
-      const file = Bun.file(SESSION_FILE);
-      if (!file.size) {
+      if (!existsSync(SESSION_FILE)) {
+        return { sessions: [] };
+      }
+      const stat = statSync(SESSION_FILE);
+      if (!stat.size) {
         return { sessions: [] };
       }
 
@@ -541,7 +656,7 @@ class ClaudeSession {
     const history = this.loadSessionHistory();
     // Filter to only sessions for current working directory
     return history.sessions.filter(
-      (s) => !s.working_dir || s.working_dir === WORKING_DIR
+      (s) => !s.working_dir || s.working_dir === this._workingDir
     );
   }
 
@@ -550,16 +665,21 @@ class ClaudeSession {
    */
   resumeSession(sessionId: string): [success: boolean, message: string] {
     const history = this.loadSessionHistory();
-    const sessionData = history.sessions.find((s) => s.session_id === sessionId);
+    const sessionData = history.sessions.find(
+      (s) => s.session_id === sessionId
+    );
 
     if (!sessionData) {
-      return [false, "Sessione non trovata"];
+      return [false, "Session not found"];
     }
 
-    if (sessionData.working_dir && sessionData.working_dir !== WORKING_DIR) {
+    if (
+      sessionData.working_dir &&
+      sessionData.working_dir !== this._workingDir
+    ) {
       return [
         false,
-        `Sessione per directory diversa: ${sessionData.working_dir}`,
+        `Session is for a different directory: ${sessionData.working_dir}`,
       ];
     }
 
@@ -571,10 +691,7 @@ class ClaudeSession {
       `Resumed session ${sessionData.session_id.slice(0, 8)}... - "${sessionData.title}"`
     );
 
-    return [
-      true,
-      `Ripresa sessione: "${sessionData.title}"`,
-    ];
+    return [true, `Resumed session: "${sessionData.title}"`];
   }
 
   /**
@@ -583,7 +700,7 @@ class ClaudeSession {
   resumeLast(): [success: boolean, message: string] {
     const sessions = this.getSessionList();
     if (sessions.length === 0) {
-      return [false, "Nessuna sessione salvata"];
+      return [false, "No saved sessions"];
     }
 
     return this.resumeSession(sessions[0]!.session_id);
