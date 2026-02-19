@@ -8,6 +8,13 @@
 
 Send text, voice, photos, documents, audio, and video. Plan and execute GSD phases, manage todos, switch between projects — all from Telegram with tappable buttons. Zero API cost, runs through your Claude Code subscription.
 
+<p align="center">
+  <img src="docs/screenshots/start.jpg" width="23%" alt="/start command showing all bot commands" />
+  <img src="docs/screenshots/project-switcher.jpg" width="23%" alt="/project switcher with all projects as tappable buttons" />
+  <img src="docs/screenshots/gsd-grid.jpg" width="23%" alt="/gsd button grid with all 16 GSD operations" />
+  <img src="docs/screenshots/gsd-progress.jpg" width="23%" alt="/gsd progress showing live project phase status" />
+</p>
+
 ## GSD Workflow Integration
 
 This fork adds deep integration with the [GSD (Get Stuff Done)](https://github.com/coleam00/claude-code-gsd) workflow for Claude Code. Tap `/gsd` to get a button grid with all 16 GSD operations:
