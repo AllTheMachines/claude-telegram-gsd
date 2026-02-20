@@ -21,7 +21,6 @@ import {
   handleRetry,
   handleProject,
   handleGsd,
-  handleSearch,
   handleText,
   handleVoice,
   handlePhoto,
@@ -69,7 +68,6 @@ bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
 bot.command("project", handleProject);
 bot.command("gsd", handleGsd);
-bot.command("search", handleSearch);
 
 // ============== Message Handlers ==============
 
@@ -105,7 +103,6 @@ const botInfo = await bot.api.getMe();
 console.log(`Bot started: @${botInfo.username}`);
 
 await bot.api.setMyCommands([
-  { command: "search", description: "Search vault notes" },
   { command: "new", description: "Start a new conversation" },
   { command: "stop", description: "Stop current query" },
   { command: "status", description: "Show session status" },

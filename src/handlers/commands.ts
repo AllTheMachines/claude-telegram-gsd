@@ -12,7 +12,6 @@ import { ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
 import { sleep } from "../utils";
 import { parseRegistry } from "../registry";
-import { searchVault, formatResults } from "../vault-search";
 
 /**
  * Parsed phase from ROADMAP.md.
@@ -528,33 +527,4 @@ export async function handleRetry(ctx: Context): Promise<void> {
   } as Context;
 
   await handleText(fakeCtx);
-}
-
-/**
- * /search - Search vault notes via Basic Memory FTS5.
- */
-export async function handleSearch(ctx: Context): Promise<void> {
-  const userId = ctx.from?.id;
-
-  if (!isAuthorized(userId, ALLOWED_USERS)) {
-    await ctx.reply("Unauthorized.");
-    return;
-  }
-
-  const query = ctx.message?.text?.replace(/^\/search\s*/i, "").trim() || "";
-
-  if (!query) {
-    await ctx.reply(
-      "Usage: /search &lt;query&gt;\nExample: /search juce plugin",
-      { parse_mode: "HTML" }
-    );
-    return;
-  }
-
-  const results = searchVault(query, 10);
-  const messages = formatResults(query, results);
-
-  for (const msg of messages) {
-    await ctx.reply(msg, { parse_mode: "HTML" });
-  }
 }
