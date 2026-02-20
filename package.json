@@ -5,15 +5,21 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx --watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
     "@grammyjs/runner": "^2.0.3",
+    "better-sqlite3": "^12.6.2",
     "dotenv": "^16.4.0",
     "grammy": "^1.38.4",
     "openai": "^6.15.0",
