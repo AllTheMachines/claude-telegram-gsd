@@ -6,6 +6,7 @@
  */
 
 import { Bot } from "grammy";
+import { autoRetry } from "@grammyjs/auto-retry";
 import { run, sequentialize } from "@grammyjs/runner";
 import { TELEGRAM_TOKEN, ALLOWED_USERS, RESTART_FILE } from "./config";
 import { session } from "./session";
@@ -20,6 +21,7 @@ import {
   handleRetry,
   handleProject,
   handleGsd,
+  handleSearch,
   handleText,
   handleVoice,
   handlePhoto,
@@ -31,6 +33,9 @@ import {
 
 // Create bot instance
 const bot = new Bot(TELEGRAM_TOKEN);
+
+// Auto-retry outbound API calls on rate limits and server errors
+bot.api.config.use(autoRetry());
 
 // Sequentialize non-command messages per user (prevents race conditions)
 // Commands bypass sequentialization so they work immediately
@@ -64,6 +69,7 @@ bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
 bot.command("project", handleProject);
 bot.command("gsd", handleGsd);
+bot.command("search", handleSearch);
 
 // ============== Message Handlers ==============
 
@@ -99,6 +105,7 @@ const botInfo = await bot.api.getMe();
 console.log(`Bot started: @${botInfo.username}`);
 
 await bot.api.setMyCommands([
+  { command: "search", description: "Search vault notes" },
   { command: "new", description: "Start a new conversation" },
   { command: "stop", description: "Stop current query" },
   { command: "status", description: "Show session status" },

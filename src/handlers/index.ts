@@ -12,6 +12,7 @@ export {
   handleRetry,
   handleProject,
   handleGsd,
+  handleSearch,
 } from "./commands";
 export { handleText } from "./text";
 export { handleVoice } from "./voice";
