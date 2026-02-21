@@ -12,6 +12,7 @@ import { ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
 import { sleep } from "../utils";
 import { parseRegistry } from "../registry";
+import { searchVault, formatResults } from "../vault-search";
 
 /**
  * Parsed phase from ROADMAP.md.
@@ -334,6 +335,32 @@ export async function handleRestart(ctx: Context): Promise<void> {
 
   // Exit - launchd will restart us
   process.exit(0);
+}
+
+/**
+ * /search - Search the Obsidian vault via Basic Memory FTS5.
+ */
+export async function handleSearch(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  // Extract query from command args (grammY sets ctx.match for commands)
+  const query = (ctx.match as string | undefined)?.trim() || "";
+  if (!query) {
+    await ctx.reply("Usage: /search <query>");
+    return;
+  }
+
+  const results = searchVault(query, 10);
+  const messages = formatResults(query, results);
+
+  for (const msg of messages) {
+    await ctx.reply(msg, { parse_mode: "HTML" });
+  }
 }
 
 /**

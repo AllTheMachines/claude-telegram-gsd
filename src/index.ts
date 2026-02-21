@@ -19,6 +19,7 @@ import {
   handleResume,
   handleRestart,
   handleRetry,
+  handleSearch,
   handleProject,
   handleGsd,
   handleText,
@@ -66,6 +67,7 @@ bot.command("status", handleStatus);
 bot.command("resume", handleResume);
 bot.command("restart", handleRestart);
 bot.command("retry", handleRetry);
+bot.command("search", handleSearch);
 bot.command("project", handleProject);
 bot.command("gsd", handleGsd);
 
@@ -110,6 +112,7 @@ await bot.api.setMyCommands([
   { command: "project", description: "Switch working directory" },
   { command: "gsd", description: "GSD workflow operations" },
   { command: "retry", description: "Retry last message" },
+  { command: "search", description: "Search the vault" },
   { command: "restart", description: "Restart the bot process" },
 ]);
 console.log("Command menu registered");

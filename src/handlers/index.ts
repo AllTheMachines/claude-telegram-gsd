@@ -10,6 +10,7 @@ export {
   handleResume,
   handleRestart,
   handleRetry,
+  handleSearch,
   handleProject,
   handleGsd,
 } from "./commands";
