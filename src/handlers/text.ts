@@ -49,6 +49,17 @@ export async function handleText(ctx: Context): Promise<void> {
     return;
   }
 
+  // 3b. Queue if another query is running
+  if (session.isRunning) {
+    const queued = session.queueMessage({ ctx });
+    if (queued) {
+      await ctx.reply("Queued — will process after current request.", { disable_notification: true });
+    } else {
+      await ctx.reply("Queue full. Please wait for the current request to finish.");
+    }
+    return;
+  }
+
   // 4. Store message for retry
   session.lastMessage = message;
 
@@ -175,4 +186,10 @@ export async function handleText(ctx: Context): Promise<void> {
   // 11. Cleanup
   stopProcessing();
   typing.stop();
+
+  // 12. Process next queued message (FIFO)
+  const next = session.dequeueMessage();
+  if (next) {
+    await handleText(next.ctx);
+  }
 }

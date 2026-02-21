@@ -73,6 +73,8 @@ function isPromptTooLong(text: string): boolean {
  */
 const MAX_SESSIONS = 5;
 
+const MAX_QUEUE_SIZE = 5;
+
 class ClaudeSession {
   sessionId: string | null = null;
   lastActivity: Date | null = null;
@@ -92,6 +94,7 @@ class ClaudeSession {
   private stopRequested = false;
   private _isProcessing = false;
   private _wasInterruptedByNewMessage = false;
+  private messageQueue: Array<{ ctx: Context }> = [];
 
   get currentWorkingDir(): string {
     return this._workingDir;
@@ -149,6 +152,33 @@ class ClaudeSession {
     return () => {
       this._isProcessing = false;
     };
+  }
+
+  /**
+   * Queue a message to be processed after the current query completes.
+   * Returns true if queued, false if queue is full.
+   */
+  queueMessage(item: { ctx: Context }): boolean {
+    if (this.messageQueue.length >= MAX_QUEUE_SIZE) {
+      return false;
+    }
+    this.messageQueue.push(item);
+    console.log(`Message queued (${this.messageQueue.length} in queue)`);
+    return true;
+  }
+
+  /**
+   * Dequeue the next message. Returns null if queue is empty.
+   */
+  dequeueMessage(): { ctx: Context } | null {
+    return this.messageQueue.shift() || null;
+  }
+
+  /**
+   * Current queue length.
+   */
+  get queueLength(): number {
+    return this.messageQueue.length;
   }
 
   /**
@@ -245,6 +275,12 @@ class ClaudeSession {
     if (systemPrompt) {
       args.push("--append-system-prompt", systemPrompt);
     }
+
+    // ask_user MCP: instruct Claude to use button prompts for multiple-choice questions
+    args.push(
+      "--append-system-prompt",
+      "TELEGRAM INTERACTION: The user is reading on a phone. When you want to ask a multiple-choice question with specific predefined options (e.g. project type, tech stack, yes/no decisions, selecting from a list), use the ask_user MCP tool instead of writing the question as plain text. The user can tap a button rather than type. After calling ask_user, stop — do not write anything else. For open-ended questions that need free-form input, just ask normally in text."
+    );
 
     if (isNewSession) {
       console.log("STARTING new Claude CLI session");
@@ -579,12 +615,13 @@ class ClaudeSession {
   }
 
   /**
-   * Kill the current session (clear session_id).
+   * Kill the current session (clear session_id) and drain the queue.
    */
   async kill(): Promise<void> {
     this.sessionId = null;
     this.lastActivity = null;
     this.conversationTitle = null;
+    this.messageQueue = [];
     console.log("Session cleared");
   }
 
