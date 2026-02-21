@@ -14,6 +14,8 @@ import {
   startTypingIndicator,
 } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
+import { autoDocument } from "../autodoc";
+import { escapeHtml } from "../formatting";
 
 /**
  * Handle incoming voice messages.
@@ -128,7 +130,30 @@ export async function handleVoice(ctx: Context): Promise<void> {
       await ctx.api.deleteMessage(chatId, processingMsg.message_id);
     } catch { /* already deleted */ }
 
-    // 12. Audit log
+    // 12. Auto-document the response
+    try {
+      const docResult = await autoDocument(transcript, claudeResponse);
+      if (docResult) {
+        const docLines = [
+          `<b>${escapeHtml(docResult.title)}</b>`,
+          '',
+          escapeHtml(docResult.summary),
+          '',
+          `<b>Saved:</b> <code>${escapeHtml(docResult.vaultPath)}</code>`,
+          `<b>Tags:</b> ${docResult.tags.map(t => `#${t}`).join(' ')}`,
+          docResult.emailSent ? 'Email sent to ideas@randomstyles.net' : '',
+        ].filter(Boolean).join('\n');
+
+        await ctx.reply(docLines, {
+          parse_mode: 'HTML',
+          disable_notification: true,
+        });
+      }
+    } catch (err) {
+      console.error("Auto-documentation failed:", err);
+    }
+
+    // 13. Audit log
     await auditLog(userId, username, "VOICE", transcript, claudeResponse);
   } catch (error) {
     console.error("Error processing voice:", error);

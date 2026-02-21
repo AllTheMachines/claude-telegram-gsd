@@ -12,6 +12,8 @@ import { isAuthorized, rateLimiter } from "../security";
 import { auditLog, auditLogRateLimit, startTypingIndicator } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
 import { handleProcessingError } from "./media-group";
+import { autoDocument } from "../autodoc";
+import { escapeHtml } from "../formatting";
 
 // Max video size (50MB - reasonable for short clips/voice memos)
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
@@ -143,6 +145,29 @@ export async function handleVideo(ctx: Context): Promise<void> {
     try {
       await ctx.api.deleteMessage(chatId, processingMsg.message_id);
     } catch { /* already deleted */ }
+
+    // Auto-document the response
+    try {
+      const docResult = await autoDocument(prompt, response);
+      if (docResult) {
+        const docLines = [
+          `<b>${escapeHtml(docResult.title)}</b>`,
+          '',
+          escapeHtml(docResult.summary),
+          '',
+          `<b>Saved:</b> <code>${escapeHtml(docResult.vaultPath)}</code>`,
+          `<b>Tags:</b> ${docResult.tags.map(t => `#${t}`).join(' ')}`,
+          docResult.emailSent ? 'Email sent to ideas@randomstyles.net' : '',
+        ].filter(Boolean).join('\n');
+
+        await ctx.reply(docLines, {
+          parse_mode: 'HTML',
+          disable_notification: true,
+        });
+      }
+    } catch (err) {
+      console.error("Auto-documentation failed:", err);
+    }
 
     await auditLog(userId, username, "VIDEO", caption || "[video]", response);
 

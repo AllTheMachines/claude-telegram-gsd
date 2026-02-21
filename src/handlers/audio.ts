@@ -17,6 +17,8 @@ import {
   startTypingIndicator,
 } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
+import { autoDocument } from "../autodoc";
+import { escapeHtml } from "../formatting";
 
 // Supported audio file extensions
 const AUDIO_EXTENSIONS = [
@@ -126,6 +128,29 @@ export async function processAudioFile(
     try {
       await ctx.api.deleteMessage(chatId, processingMsg.message_id);
     } catch { /* already deleted */ }
+
+    // Auto-document the response (use transcript as query — it's the user's intent)
+    try {
+      const docResult = await autoDocument(transcript, claudeResponse);
+      if (docResult) {
+        const docLines = [
+          `<b>${escapeHtml(docResult.title)}</b>`,
+          '',
+          escapeHtml(docResult.summary),
+          '',
+          `<b>Saved:</b> <code>${escapeHtml(docResult.vaultPath)}</code>`,
+          `<b>Tags:</b> ${docResult.tags.map(t => `#${t}`).join(' ')}`,
+          docResult.emailSent ? 'Email sent to ideas@randomstyles.net' : '',
+        ].filter(Boolean).join('\n');
+
+        await ctx.reply(docLines, {
+          parse_mode: 'HTML',
+          disable_notification: true,
+        });
+      }
+    } catch (err) {
+      console.error("Auto-documentation failed:", err);
+    }
 
     // Audit log
     await auditLog(userId, username, "AUDIO", transcript, claudeResponse);

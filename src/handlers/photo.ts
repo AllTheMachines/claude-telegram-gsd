@@ -12,6 +12,8 @@ import { isAuthorized, rateLimiter } from "../security";
 import { auditLog, auditLogRateLimit, startTypingIndicator } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
 import { createMediaGroupBuffer, handleProcessingError } from "./media-group";
+import { autoDocument } from "../autodoc";
+import { escapeHtml } from "../formatting";
 
 // Create photo-specific media group buffer
 const photoBuffer = createMediaGroupBuffer({
@@ -105,6 +107,29 @@ async function processPhotos(
     try {
       await ctx.api.deleteMessage(chatId, processingMsg.message_id);
     } catch { /* already deleted */ }
+
+    // Auto-document the response
+    try {
+      const docResult = await autoDocument(prompt, response);
+      if (docResult) {
+        const docLines = [
+          `<b>${escapeHtml(docResult.title)}</b>`,
+          '',
+          escapeHtml(docResult.summary),
+          '',
+          `<b>Saved:</b> <code>${escapeHtml(docResult.vaultPath)}</code>`,
+          `<b>Tags:</b> ${docResult.tags.map(t => `#${t}`).join(' ')}`,
+          docResult.emailSent ? 'Email sent to ideas@randomstyles.net' : '',
+        ].filter(Boolean).join('\n');
+
+        await ctx.reply(docLines, {
+          parse_mode: 'HTML',
+          disable_notification: true,
+        });
+      }
+    } catch (err) {
+      console.error("Auto-documentation failed:", err);
+    }
 
     await auditLog(userId, username, "PHOTO", prompt, response);
   } catch (error) {
