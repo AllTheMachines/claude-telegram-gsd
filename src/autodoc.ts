@@ -146,8 +146,10 @@ function classifyContent(query: string, response: string): string {
   for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
     let score = 0;
     for (const [keyword, weight] of keywords) {
-      // Count occurrences of the keyword phrase
-      const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      // Use word boundaries so "filter" doesn't match "filtered" in unrelated contexts
+      // Multi-word phrases already act as natural boundaries
+      const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
       const matches = combinedText.match(regex);
       if (matches) {
         score += matches.length * weight;
@@ -159,7 +161,7 @@ function classifyContent(query: string, response: string): string {
   // Find the highest-scoring category
   let bestCategory = 'inbox';
   let bestScore = 0;
-  const MINIMUM_THRESHOLD = 3; // At least this score to classify confidently
+  const MINIMUM_THRESHOLD = 6; // At least this score to classify confidently
 
   for (const [category, score] of Object.entries(scores)) {
     if (score > bestScore) {
