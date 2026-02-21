@@ -218,6 +218,12 @@ export function buildActionKeyboard(options: ActionKeyboardOptions = {}) {
     }
   }
 
+  // GSD work management (always present)
+  rows.push([
+    { text: "⏸ Pause Work", callback_data: "gsd-run:/gsd:pause-work" },
+    { text: "▶ Resume Work", callback_data: "gsd-run:/gsd:resume-work" },
+  ]);
+
   // Standard action buttons (always present)
   rows.push([
     { text: "🛑 Stop", callback_data: "action:stop" },
