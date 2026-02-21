@@ -6,31 +6,7 @@
 
 **Control Claude Code from your phone — with full [GSD workflow](https://github.com/coleam00/claude-code-gsd) integration.**
 
-Send text, voice, photos, documents, audio, and video. Plan and execute GSD phases, manage todos, switch between projects — all from Telegram with tappable buttons. Zero API cost, runs through your Claude Code subscription.
-
-<p align="center">
-  <img src="docs/screenshots/start.jpg" width="23%" alt="/start command showing all bot commands" />
-  <img src="docs/screenshots/project-switcher.jpg" width="23%" alt="/project switcher with all projects as tappable buttons" />
-  <img src="docs/screenshots/gsd-grid.jpg" width="23%" alt="/gsd button grid with all 16 GSD operations" />
-  <img src="docs/screenshots/gsd-progress.jpg" width="23%" alt="/gsd progress showing live project phase status" />
-</p>
-
-## GSD Workflow Integration
-
-This fork adds deep integration with the [GSD (Get Stuff Done)](https://github.com/coleam00/claude-code-gsd) workflow for Claude Code. Tap `/gsd` to get a button grid with all 16 GSD operations:
-
-| | |
-|---|---|
-| Progress | Quick Task |
-| Plan Phase | Execute Phase |
-| Discuss Phase | Research Phase |
-| Verify Work | Audit Milestone |
-| Check Todos | Add Todo |
-| Add Phase | Remove Phase |
-| New Milestone | Settings |
-| Debug | Help |
-
-Phase-based operations (Plan, Execute, Discuss, Research, Verify, Remove) show a second-level picker with your roadmap phases. Combined with `/project` to switch between projects, you can manage your entire GSD workflow from your phone or watch.
+Send text, voice, photos, documents, audio, and video. Plan and execute GSD phases, pause and resume work safely, switch between projects — all from Telegram with tappable buttons. Zero API cost, runs through your Claude Code subscription.
 
 ## How It Works
 
@@ -41,32 +17,74 @@ The bot spawns `claude` CLI as a subprocess, piping your Telegram messages in an
 - **Real streaming** — text appears as Claude writes it, not dumped at the end
 - **Session persistence** — conversations continue across messages via `--resume`
 
+## GSD Workflow Integration
+
+Deep integration with the [GSD (Get Stuff Done)](https://github.com/coleam00/claude-code-gsd) workflow. Tap `/gsd` to get a button grid with all operations:
+
+| | |
+|---|---|
+| Progress | Quick Task |
+| Plan Phase | Execute Phase |
+| Discuss Phase | Research Phase |
+| Verify Work | Audit Milestone |
+| **Pause Work** | **Resume Work** |
+| Check Todos | Add Todo |
+| Add Phase | Remove Phase |
+| New Project | New Milestone |
+| Settings | Debug |
+| Help | |
+
+Phase-based operations (Plan, Execute, Discuss, Research, Verify, Remove) show a phase picker from your roadmap.
+
+### Contextual GSD Buttons
+
+When Claude suggests a GSD command in its response (like `/gsd:execute-phase 8`), it automatically appears as a tappable button. No more copy-pasting commands — tap to run.
+
+If Claude suggests clearing context first, a combined "Clear + Command" button appears that handles both in one tap.
+
+### Direct Command Routing
+
+Type any GSD command directly in chat — `/gsd:progress`, `/gsd:execute-phase 8`, `/gsd:plan-phase 3` — and it runs immediately. No need to navigate the menu for commands you already know.
+
+### Action Bar
+
+Every response includes an action bar:
+
+```
+[ GSD ] [ Pause ] [ Resume ]
+[ Stop ] [ Retry ] [ New    ]
+```
+
+Plus contextual GSD suggestion buttons above when relevant.
+
 ## Features
 
 ### Media Support
-- **Text** — Ask questions, give instructions, have conversations
-- **Voice** — Speak naturally, transcribed via OpenAI Whisper
-- **Photos** — Screenshots, documents, anything visual (supports albums)
+- **Text** — ask questions, give instructions, have conversations
+- **Voice** — speak naturally, transcribed via OpenAI Whisper
+- **Photos** — screenshots, documents, anything visual (supports albums)
 - **Documents** — PDFs (via pdftotext), text files, archives (ZIP, TAR)
 - **Audio** — mp3, m4a, ogg, wav files transcribed and processed
-- **Video** — Video messages and video notes
+- **Video** — video messages and video notes
 
 ### Session Management
 - **Session persistence** — conversations continue across messages
-- **Resume picker** — `/resume` shows recent sessions as tappable buttons with date/time
+- **Pause/Resume Work** — safely hand off work across sessions using GSD's context handoff
+- **Resume picker** — `/resume` shows recent sessions as tappable buttons
 - **Project switching** — `/project` switches Claude's working directory between projects
 - **Auto-retry** — if Claude Code crashes, the bot retries automatically
 - **Context tracking** — see context window usage percentage after each response
 
 ### Interactive UX
-- **Action buttons** — after each response: `[Stop] [Retry] [New] [GSD]`
-- **Status with actions** — `/status` shows session info with `[New] [Switch Project] [GSD] [Retry]`
-- **GSD workflow** — `/gsd` shows a button grid for project management operations
+- **Contextual buttons** — GSD commands Claude suggests become tappable buttons
+- **Action bar** — GSD, Pause, Resume, Stop, Retry, New after every response
+- **GSD workflow** — `/gsd` shows a button grid for all project management operations
 - **ask_user MCP** — Claude can present options as tappable inline buttons
-- **Message queuing** — send multiple messages while Claude works, they queue up. Prefix with `!` or `/stop` to interrupt
+- **Message queuing** — send multiple messages while Claude works, they queue up
+- **Interrupt** — prefix with `!` or use `/stop` to interrupt
 
 ### Streaming & Notifications
-- **Real partial streaming** — text appears progressively via `--include-partial-messages`
+- **Real partial streaming** — text appears progressively
 - **Notification bundling** — thinking + tool updates in a single editable message (cleaned up after response)
 - **Extended thinking** — trigger Claude's reasoning with words like "think" or "reason"
 - **Silent status** — intermediate updates are silent, only the final response notifies
@@ -150,17 +168,31 @@ The bot includes a built-in `ask_user` MCP server that lets Claude present optio
 
 | Command    | Description                                          |
 | ---------- | ---------------------------------------------------- |
-| `/start`   | Show status and your user ID                         |
+| `/start`   | Show status and available commands                   |
 | `/new`     | Start a fresh session                                |
+| `/clear`   | Clear context and start fresh                        |
 | `/stop`    | Interrupt current query                              |
 | `/status`  | Session info + context usage + action buttons        |
 | `/resume`  | Pick from recent sessions to resume (with recap)     |
 | `/retry`   | Retry the last message                               |
 | `/project` | Switch working directory between projects            |
 | `/gsd`     | GSD workflow operations (plan, execute, progress)    |
+| `/search`  | Search the vault (FTS5)                              |
 | `/restart` | Restart the bot process                              |
 
-## Running as a Service (macOS)
+GSD commands can also be typed directly: `/gsd:progress`, `/gsd:execute-phase 8`, etc.
+
+## Running as a Service
+
+### pm2 (Windows/Linux)
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 logs telegram-claude
+pm2 restart telegram-claude
+```
+
+### launchd (macOS)
 
 ```bash
 cp launchagent/com.claude-telegram-ts.plist.template ~/Library/LaunchAgents/com.claude-telegram-ts.plist
@@ -170,33 +202,12 @@ launchctl load ~/Library/LaunchAgents/com.claude-telegram-ts.plist
 
 The bot will start automatically on login and restart if it crashes.
 
-**Prevent sleep:** To keep the bot running when your Mac is idle, go to **System Settings > Battery > Options** and enable **"Prevent automatic sleeping when the display is off"** (when on power adapter).
-
 **Logs:**
 
 ```bash
 tail -f /tmp/claude-telegram-bot-ts.log   # stdout
 tail -f /tmp/claude-telegram-bot-ts.err   # stderr
 ```
-
-**Shell aliases:**
-
-```bash
-alias cbot='launchctl list | grep com.claude-telegram-ts'
-alias cbot-stop='launchctl bootout gui/$(id -u)/com.claude-telegram-ts 2>/dev/null && echo "Stopped"'
-alias cbot-start='launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude-telegram-ts.plist 2>/dev/null && echo "Started"'
-alias cbot-restart='launchctl kickstart -k gui/$(id -u)/com.claude-telegram-ts && echo "Restarted"'
-alias cbot-logs='tail -f /tmp/claude-telegram-bot-ts.log'
-```
-
-## Running on Windows
-
-```bash
-cd claude-telegram-gsd
-npx tsx src/index.ts
-```
-
-The bot works on Windows with Node.js. Process management uses `taskkill /T /F` instead of Unix signals. You can set it up as a Windows service or run it in a terminal.
 
 ## Development
 
@@ -248,7 +259,7 @@ Multiple layers protect against misuse:
 
 ## Credits
 
-Forked from [linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot) by [Fabrizio Rinaldi](https://github.com/linuz90). The original project provides the core Telegram-to-Claude bridge, media handling, and security model. This fork adds GSD workflow integration, CLI subprocess architecture, action buttons, project switching, and context tracking.
+Forked from [linuz90/claude-telegram-bot](https://github.com/linuz90/claude-telegram-bot) by [Fabrizio Rinaldi](https://github.com/linuz90). The original project provides the core Telegram-to-Claude bridge, media handling, and security model. This fork adds GSD workflow integration, contextual command buttons, project switching, auto-documentation, vault search, and session management.
 
 ## License
 
