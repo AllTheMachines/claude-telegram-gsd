@@ -14,7 +14,7 @@ import { isAuthorized } from "../security";
 import { auditLog, sleep, startTypingIndicator } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
 import { parseRegistry } from "../registry";
-import { GSD_OPERATIONS, parseRoadmap, handleGsd, handleProject, handleResume, handleRetry } from "./commands";
+import { GSD_OPERATIONS, parseRoadmap, handleGsd, handleProject, handleResume, handleRetry, sendGsdCommand } from "./commands";
 
 /**
  * Handle callback queries from inline keyboards.
@@ -54,13 +54,38 @@ export async function handleCallback(ctx: Context): Promise<void> {
     return;
   }
 
-  // 2d. Handle GSD callbacks: gsd:{operation}
+  // 2d. Handle gsd-run: — Run a GSD command in the current session
+  if (callbackData.startsWith("gsd-run:")) {
+    const command = callbackData.replace("gsd-run:", "");
+    try { await ctx.deleteMessage(); } catch {}
+    await ctx.answerCallbackQuery();
+    await sendGsdCommand(ctx, command, command, username, userId, chatId);
+    return;
+  }
+
+  // 2e. Handle gsd-fresh: — Clear session, then run GSD command
+  if (callbackData.startsWith("gsd-fresh:")) {
+    const command = callbackData.replace("gsd-fresh:", "");
+    try { await ctx.deleteMessage(); } catch {}
+    await ctx.answerCallbackQuery();
+    // Kill session first
+    if (session.isRunning) {
+      await session.stop();
+      await sleep(100);
+      session.clearStopRequested();
+    }
+    await session.kill();
+    await sendGsdCommand(ctx, command, command, username, userId, chatId);
+    return;
+  }
+
+  // 2f. Handle GSD callbacks: gsd:{operation}
   if (callbackData.startsWith("gsd:")) {
     await handleGsdCallback(ctx, callbackData, chatId);
     return;
   }
 
-  // 2e. Handle GSD phase picker: gsd-{op}:{phase}
+  // 2g. Handle GSD phase picker: gsd-{op}:{phase}
   const gsdPhasePrefixes = ["gsd-exec:", "gsd-plan:", "gsd-discuss:", "gsd-research:", "gsd-verify:", "gsd-remove:"];
   if (gsdPhasePrefixes.some((p) => callbackData.startsWith(p))) {
     await handleGsdPhaseCallback(ctx, callbackData, chatId);
@@ -510,62 +535,3 @@ async function handleGsdPhaseCallback(
   await sendGsdCommand(ctx, command, label, username, userId, chatId);
 }
 
-/**
- * Send a GSD command to the Claude session and stream the response.
- */
-async function sendGsdCommand(
-  ctx: Context,
-  command: string,
-  label: string,
-  username: string,
-  userId: number,
-  chatId: number
-): Promise<void> {
-  // Interrupt any running query
-  if (session.isRunning) {
-    await session.stop();
-    await new Promise((r) => setTimeout(r, 100));
-    session.clearStopRequested();
-  }
-
-  const typing = startTypingIndicator(ctx);
-  const state = new StreamingState();
-  const statusCallback = createStatusCallback(ctx, state);
-
-  try {
-    const response = await session.sendMessageStreaming(
-      command,
-      username,
-      userId,
-      statusCallback,
-      chatId,
-      ctx
-    );
-
-    await auditLog(userId, username, "GSD", command, response);
-  } catch (error) {
-    console.error("Error processing GSD command:", error);
-
-    for (const toolMsg of state.toolMessages) {
-      try {
-        await ctx.api.deleteMessage(toolMsg.chat.id, toolMsg.message_id);
-      } catch (e) {
-        console.debug("Failed to delete tool message:", e);
-      }
-    }
-
-    if (
-      String(error).includes("abort") ||
-      String(error).includes("cancel")
-    ) {
-      const wasInterrupt = session.consumeInterruptFlag();
-      if (!wasInterrupt) {
-        await ctx.reply("Query stopped.");
-      }
-    } else {
-      await ctx.reply(`Error: ${String(error).slice(0, 200)}`);
-    }
-  } finally {
-    typing.stop();
-  }
-}

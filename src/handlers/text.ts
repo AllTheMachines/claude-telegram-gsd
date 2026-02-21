@@ -14,7 +14,12 @@ import {
 } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
 import { autoDocument, formatDocReply } from "../autodoc";
-import { escapeHtml } from "../formatting";
+import {
+  escapeHtml,
+  extractGsdCommands,
+  buildActionKeyboard,
+} from "../formatting";
+import { getLastActionBar, setLastActionBar } from "./commands";
 
 /**
  * Handle incoming text messages.
@@ -136,21 +141,27 @@ export async function handleText(ctx: Context): Promise<void> {
             })()
           : null;
 
-        const keyboard = {
-          inline_keyboard: [
-            [
-              { text: "🛑 Stop", callback_data: "action:stop" },
-              { text: "🔄 Retry", callback_data: "action:retry" },
-              { text: "🆕 New", callback_data: "action:new" },
-              { text: "📋 GSD", callback_data: "action:gsd" },
-            ],
-          ],
-        };
+        // Extract GSD suggestions from response
+        const { commands: gsdCmds, hasClearSuggestion } =
+          extractGsdCommands(response);
+        const keyboard = buildActionKeyboard({
+          gsdCommands: gsdCmds,
+          hasClearSuggestion,
+        });
 
-        await ctx.reply(barText || "—", {
+        // Delete old action bar
+        const oldBar = getLastActionBar();
+        if (oldBar) {
+          try {
+            await ctx.api.deleteMessage(oldBar.chatId, oldBar.messageId);
+          } catch {}
+        }
+
+        const barMsg = await ctx.reply(barText || "—", {
           reply_markup: keyboard,
           disable_notification: true,
         });
+        setLastActionBar(chatId, barMsg.message_id);
       }
 
       break; // Success - exit retry loop

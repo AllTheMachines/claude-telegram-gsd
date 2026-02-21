@@ -131,6 +131,104 @@ function convertBlockquotes(text: string): string {
 // Legacy alias
 export const convertMarkdownForTelegram = convertMarkdownToHtml;
 
+// ============== GSD Command Extraction ==============
+
+export interface GsdCommandSuggestion {
+  command: string;  // "/gsd:execute-phase 8"
+  label: string;    // "Execute Phase 8"
+}
+
+/**
+ * Extract GSD commands from Claude's response text.
+ * Finds patterns like /gsd:command-name and /gsd:command-name 8
+ */
+export function extractGsdCommands(text: string): {
+  commands: GsdCommandSuggestion[];
+  hasClearSuggestion: boolean;
+} {
+  const regex = /\/gsd:([a-z-]+)(?:\s+([\d.]+))?/g;
+  const seen = new Set<string>();
+  const commands: GsdCommandSuggestion[] = [];
+
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const fullMatch = match[0]!;
+    if (seen.has(fullMatch)) continue;
+    seen.add(fullMatch);
+
+    const cmdName = match[1]!;
+    const arg = match[2];
+
+    // Convert to human-readable label
+    const label =
+      cmdName
+        .split("-")
+        .map((w) => w[0]!.toUpperCase() + w.slice(1))
+        .join(" ") + (arg ? ` ${arg}` : "");
+
+    commands.push({ command: fullMatch, label });
+  }
+
+  const hasClearSuggestion = /\/clear|fresh context/i.test(text);
+
+  return { commands, hasClearSuggestion };
+}
+
+// ============== Action Keyboard Builder ==============
+
+export interface ActionKeyboardOptions {
+  gsdCommands?: GsdCommandSuggestion[];
+  hasClearSuggestion?: boolean;
+}
+
+/**
+ * Build contextual inline keyboard with GSD suggestion buttons
+ * and standard action buttons.
+ */
+export function buildActionKeyboard(options: ActionKeyboardOptions = {}) {
+  const rows: { text: string; callback_data: string }[][] = [];
+
+  const { gsdCommands = [], hasClearSuggestion = false } = options;
+
+  if (gsdCommands.length > 0) {
+    // Contextual GSD buttons: max 2 per row, max 4 total
+    for (let i = 0; i < Math.min(gsdCommands.length, 4); i += 2) {
+      const row: { text: string; callback_data: string }[] = [];
+      row.push({
+        text: `▶ ${gsdCommands[i]!.label}`,
+        callback_data: `gsd-run:${gsdCommands[i]!.command}`,
+      });
+      if (i + 1 < gsdCommands.length && i + 1 < 4) {
+        row.push({
+          text: `▶ ${gsdCommands[i + 1]!.label}`,
+          callback_data: `gsd-run:${gsdCommands[i + 1]!.command}`,
+        });
+      }
+      rows.push(row);
+    }
+
+    // "Clear + primary command" button if /clear was suggested
+    if (hasClearSuggestion && gsdCommands[0]) {
+      rows.push([
+        {
+          text: `🔄 Clear → ${gsdCommands[0].label}`,
+          callback_data: `gsd-fresh:${gsdCommands[0].command}`,
+        },
+      ]);
+    }
+  }
+
+  // Standard action buttons (always present)
+  rows.push([
+    { text: "🛑 Stop", callback_data: "action:stop" },
+    { text: "🔄 Retry", callback_data: "action:retry" },
+    { text: "🆕 New", callback_data: "action:new" },
+    { text: "📋 GSD", callback_data: "action:gsd" },
+  ]);
+
+  return { inline_keyboard: rows };
+}
+
 // ============== Tool Status Formatting ==============
 
 /**

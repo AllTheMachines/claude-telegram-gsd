@@ -14,6 +14,7 @@ import { unlinkSync, readFileSync, existsSync } from "fs";
 import {
   handleStart,
   handleNew,
+  handleClear,
   handleStop,
   handleStatus,
   handleResume,
@@ -62,6 +63,7 @@ bot.use(
 
 bot.command("start", handleStart);
 bot.command("new", handleNew);
+bot.command("clear", handleClear);
 bot.command("stop", handleStop);
 bot.command("status", handleStatus);
 bot.command("resume", handleResume);
@@ -106,6 +108,7 @@ console.log(`Bot started: @${botInfo.username}`);
 
 await bot.api.setMyCommands([
   { command: "new", description: "Start a new conversation" },
+  { command: "clear", description: "Clear context and start fresh" },
   { command: "stop", description: "Stop current query" },
   { command: "status", description: "Show session status" },
   { command: "resume", description: "Resume a saved session" },

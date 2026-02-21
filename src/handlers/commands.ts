@@ -10,9 +10,14 @@ import { join } from "path";
 import { session } from "../session";
 import { ALLOWED_USERS, RESTART_FILE } from "../config";
 import { isAuthorized } from "../security";
-import { sleep } from "../utils";
+import { auditLog, sleep, startTypingIndicator } from "../utils";
 import { parseRegistry } from "../registry";
 import { searchVault, formatResults } from "../vault-search";
+import { StreamingState, createStatusCallback } from "./streaming";
+import {
+  extractGsdCommands,
+  buildActionKeyboard,
+} from "../formatting";
 
 /**
  * Parsed phase from ROADMAP.md.
@@ -32,27 +37,34 @@ export function parseRoadmap(workingDir: string): RoadmapPhase[] {
   const roadmapPath = join(workingDir, ".planning", "ROADMAP.md");
   if (!existsSync(roadmapPath)) return [];
 
-  try {
-    const content = readFileSync(roadmapPath, "utf-8");
-    const phases: RoadmapPhase[] = [];
-    const regex = /^- \[(.)\] \*\*Phase ([\d.]+): ([^*]+)\*\* - (.+)$/gm;
-    let match;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const content = readFileSync(roadmapPath, "utf-8");
+      const phases: RoadmapPhase[] = [];
+      const regex = /^- \[(.)\] \*\*Phase ([\d.]+): ([^*]+)\*\* - (.+)$/gm;
+      let match;
 
-    while ((match = regex.exec(content)) !== null) {
-      const statusChar = match[1]!;
-      phases.push({
-        number: match[2]!,
-        name: match[3]!.trim(),
-        description: match[4]!.trim(),
-        status:
-          statusChar === "x" ? "done" : statusChar === "~" ? "skipped" : "pending",
-      });
+      while ((match = regex.exec(content)) !== null) {
+        const statusChar = match[1]!;
+        phases.push({
+          number: match[2]!,
+          name: match[3]!.trim(),
+          description: match[4]!.trim(),
+          status:
+            statusChar === "x" ? "done" : statusChar === "~" ? "skipped" : "pending",
+        });
+      }
+
+      return phases;
+    } catch {
+      if (attempt === 0) {
+        // Windows file lock — spin wait and retry
+        const start = Date.now();
+        while (Date.now() - start < 200) { /* spin wait */ }
+      }
     }
-
-    return phases;
-  } catch {
-    return [];
   }
+  return [];
 }
 
 
@@ -77,6 +89,7 @@ export async function handleStart(ctx: Context): Promise<void> {
       `Working directory: <code>${workDir}</code>\n\n` +
       `<b>Commands:</b>\n` +
       `/new - Start fresh session\n` +
+      `/clear - Clear context\n` +
       `/stop - Stop current query\n` +
       `/status - Show detailed status\n` +
       `/project - Switch project\n` +
@@ -116,6 +129,32 @@ export async function handleNew(ctx: Context): Promise<void> {
   await session.kill();
 
   await ctx.reply("🆕 Session cleared. Next message starts fresh.");
+}
+
+/**
+ * /clear - Clear session (alias for /new with different messaging).
+ */
+export async function handleClear(ctx: Context): Promise<void> {
+  const userId = ctx.from?.id;
+
+  if (!isAuthorized(userId, ALLOWED_USERS)) {
+    await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  // Stop any running query
+  if (session.isRunning) {
+    const result = await session.stop();
+    if (result) {
+      await sleep(100);
+      session.clearStopRequested();
+    }
+  }
+
+  // Clear session
+  await session.kill();
+
+  await ctx.reply("Context cleared. Next message starts fresh.");
 }
 
 /**
@@ -456,12 +495,24 @@ export const GSD_OPERATIONS: [string, string, string][] = [
 
 /**
  * /gsd - Show GSD operations with inline keyboard and project context.
+ * Also handles /gsd:command routing (e.g., /gsd:execute-phase 8).
  */
 export async function handleGsd(ctx: Context): Promise<void> {
   const userId = ctx.from?.id;
+  const username = ctx.from?.username || "unknown";
+  const chatId = ctx.chat?.id;
 
   if (!isAuthorized(userId, ALLOWED_USERS)) {
     await ctx.reply("Unauthorized.");
+    return;
+  }
+
+  // Handle /gsd:command routing — grammY sets ctx.match to ":execute-phase 8"
+  const match = (ctx.match as string | undefined)?.trim() || "";
+  if (match.startsWith(":") && chatId && userId) {
+    const fullCommand = `/gsd${match}`;
+    const label = match.slice(1).split(" ")[0] || match.slice(1);
+    await sendGsdCommand(ctx, fullCommand, label, username, userId, chatId);
     return;
   }
 
@@ -512,6 +563,113 @@ export async function handleGsd(ctx: Context): Promise<void> {
       },
     }
   );
+}
+
+// ============== Action Bar Tracking ==============
+
+let lastActionBarMsg: { chatId: number; messageId: number } | null = null;
+
+export function setLastActionBar(chatId: number, messageId: number) {
+  lastActionBarMsg = { chatId, messageId };
+}
+
+export function getLastActionBar() {
+  return lastActionBarMsg;
+}
+
+/**
+ * Send a GSD command to the Claude session and stream the response.
+ * Shows context bar + contextual keyboard after response.
+ */
+export async function sendGsdCommand(
+  ctx: Context,
+  command: string,
+  label: string,
+  username: string,
+  userId: number,
+  chatId: number
+): Promise<void> {
+  // Interrupt any running query
+  if (session.isRunning) {
+    await session.stop();
+    await new Promise((r) => setTimeout(r, 100));
+    session.clearStopRequested();
+  }
+
+  const typing = startTypingIndicator(ctx);
+  const state = new StreamingState();
+  const statusCallback = createStatusCallback(ctx, state);
+
+  try {
+    const response = await session.sendMessageStreaming(
+      command,
+      username,
+      userId,
+      statusCallback,
+      chatId,
+      ctx
+    );
+
+    await auditLog(userId, username, "GSD", command, response);
+
+    // Show context bar + contextual keyboard
+    const { commands: gsdCmds, hasClearSuggestion } =
+      extractGsdCommands(response);
+    const keyboard = buildActionKeyboard({
+      gsdCommands: gsdCmds,
+      hasClearSuggestion,
+    });
+
+    const pct = session.contextPercent;
+    const barText =
+      pct !== null
+        ? (() => {
+            const clamped = Math.min(pct, 100);
+            const filled = Math.min(Math.round(clamped / 10), 10);
+            return (
+              "█".repeat(filled) + "░".repeat(10 - filled) + ` ${clamped}%`
+            );
+          })()
+        : null;
+
+    // Delete old action bar
+    const oldBar = getLastActionBar();
+    if (oldBar) {
+      try {
+        await ctx.api.deleteMessage(oldBar.chatId, oldBar.messageId);
+      } catch {}
+    }
+
+    const barMsg = await ctx.reply(barText || "—", {
+      reply_markup: keyboard,
+      disable_notification: true,
+    });
+    setLastActionBar(chatId, barMsg.message_id);
+  } catch (error) {
+    console.error("Error processing GSD command:", error);
+
+    for (const toolMsg of state.toolMessages) {
+      try {
+        await ctx.api.deleteMessage(toolMsg.chat.id, toolMsg.message_id);
+      } catch (e) {
+        console.debug("Failed to delete tool message:", e);
+      }
+    }
+
+    if (
+      String(error).includes("abort") ||
+      String(error).includes("cancel")
+    ) {
+      const wasInterrupt = session.consumeInterruptFlag();
+      if (!wasInterrupt) {
+        await ctx.reply("Query stopped.");
+      }
+    } else {
+      await ctx.reply(`Error: ${String(error).slice(0, 200)}`);
+    }
+  } finally {
+    typing.stop();
+  }
 }
 
 /**
