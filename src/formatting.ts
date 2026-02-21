@@ -218,18 +218,16 @@ export function buildActionKeyboard(options: ActionKeyboardOptions = {}) {
     }
   }
 
-  // GSD work management (always present)
-  rows.push([
-    { text: "⏸ Pause Work", callback_data: "gsd-run:/gsd:pause-work" },
-    { text: "▶ Resume Work", callback_data: "gsd-run:/gsd:resume-work" },
-  ]);
-
   // Standard action buttons (always present)
+  rows.push([
+    { text: "📋 GSD", callback_data: "action:gsd" },
+    { text: "⏸ Pause", callback_data: "gsd-run:/gsd:pause-work" },
+    { text: "▶ Resume", callback_data: "gsd-run:/gsd:resume-work" },
+  ]);
   rows.push([
     { text: "🛑 Stop", callback_data: "action:stop" },
     { text: "🔄 Retry", callback_data: "action:retry" },
     { text: "🆕 New", callback_data: "action:new" },
-    { text: "📋 GSD", callback_data: "action:gsd" },
   ]);
 
   return { inline_keyboard: rows };

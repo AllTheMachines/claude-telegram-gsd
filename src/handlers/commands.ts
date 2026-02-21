@@ -478,7 +478,10 @@ export const GSD_OPERATIONS: [string, string, string][] = [
   // Row 4: Verification
   ["verify", "Verify Work", "/gsd:verify-work"],
   ["audit", "Audit Milestone", "/gsd:audit-milestone"],
-  // Row 5: Todos
+  // Row 5: Session management
+  ["pause-work", "Pause Work", "/gsd:pause-work"],
+  ["resume-work", "Resume Work", "/gsd:resume-work"],
+  // Row 6: Todos
   ["todos", "Check Todos", "/gsd:check-todos"],
   ["todo", "Add Todo", "/gsd:add-todo"],
   // Row 6: Phase management
