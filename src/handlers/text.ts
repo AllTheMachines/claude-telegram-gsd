@@ -13,6 +13,8 @@ import {
   startTypingIndicator,
 } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
+import { autoDocument } from "../autodoc";
+import { escapeHtml } from "../formatting";
 
 /**
  * Handle incoming text messages.
@@ -101,7 +103,39 @@ export async function handleText(ctx: Context): Promise<void> {
       // 10. Audit log
       await auditLog(userId, username, "TEXT", message, response);
 
-      // 10b. Show context bar + action buttons
+      // 10b. Delete processing message before autodoc + context bar
+      try {
+        await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+      } catch { /* already deleted */ }
+
+      // 10c. Auto-document the response (skip for trivial/system responses)
+      const isAskUser = response.includes("[Waiting for user selection]");
+      const isContextLimit = response.includes("Context limit reached");
+      if (!isAskUser && !isContextLimit) {
+        try {
+          const docResult = await autoDocument(message, response);
+          if (docResult) {
+            const docLines = [
+              `<b>${escapeHtml(docResult.title)}</b>`,
+              '',
+              escapeHtml(docResult.summary),
+              '',
+              `<b>Saved:</b> <code>${escapeHtml(docResult.vaultPath)}</code>`,
+              `<b>Tags:</b> ${docResult.tags.map(t => `#${t}`).join(' ')}`,
+              docResult.emailSent ? 'Email sent to ideas@randomstyles.net' : '',
+            ].filter(Boolean).join('\n');
+
+            await ctx.reply(docLines, {
+              parse_mode: 'HTML',
+              disable_notification: true,
+            });
+          }
+        } catch (err) {
+          console.error("Auto-documentation failed:", err);
+        }
+      }
+
+      // 10d. Show context bar + action buttons
       {
         const pct = session.contextPercent;
         const barText = pct !== null
@@ -128,11 +162,6 @@ export async function handleText(ctx: Context): Promise<void> {
           disable_notification: true,
         });
       }
-
-      // Delete processing message after successful response
-      try {
-        await ctx.api.deleteMessage(chatId, processingMsg.message_id);
-      } catch { /* already deleted */ }
 
       break; // Success - exit retry loop
     } catch (error) {
