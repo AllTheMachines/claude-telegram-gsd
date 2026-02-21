@@ -66,6 +66,9 @@ export async function handleText(ctx: Context): Promise<void> {
   // 7. Start typing indicator
   const typing = startTypingIndicator(ctx);
 
+  // 7b. Send "Processing..." message while Claude works
+  const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
   // 8. Create streaming state and callback
   let state = new StreamingState();
   let statusCallback = createStatusCallback(ctx, state);
@@ -115,6 +118,11 @@ export async function handleText(ctx: Context): Promise<void> {
         });
       }
 
+      // Delete processing message after successful response
+      try {
+        await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+      } catch { /* already deleted */ }
+
       break; // Success - exit retry loop
     } catch (error) {
       const errorStr = String(error);
@@ -145,6 +153,11 @@ export async function handleText(ctx: Context): Promise<void> {
       // Final attempt failed or non-retryable error
       console.error("Error processing message:", error);
 
+      // Delete processing message before sending error
+      try {
+        await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+      } catch { /* already deleted */ }
+
       // Check if it was a cancellation
       if (errorStr.includes("abort") || errorStr.includes("cancel")) {
         // Only show "Query stopped" if it was an explicit stop, not an interrupt from a new message
@@ -153,7 +166,7 @@ export async function handleText(ctx: Context): Promise<void> {
           await ctx.reply("🛑 Query stopped.");
         }
       } else {
-        await ctx.reply(`❌ Error: ${errorStr.slice(0, 200)}`);
+        await ctx.reply("Something went wrong. Try again or /new for a fresh session.");
       }
       break; // Exit loop after handling error
     }

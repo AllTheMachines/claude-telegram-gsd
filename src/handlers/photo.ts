@@ -88,6 +88,9 @@ async function processPhotos(
   const state = new StreamingState();
   const statusCallback = createStatusCallback(ctx, state);
 
+  // Send "Processing..." message before Claude call
+  const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
   try {
     const response = await session.sendMessageStreaming(
       prompt,
@@ -98,8 +101,17 @@ async function processPhotos(
       ctx
     );
 
+    // Delete processing message after response
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
+
     await auditLog(userId, username, "PHOTO", prompt, response);
   } catch (error) {
+    // Delete processing message before error reply
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
     await handleProcessingError(ctx, error, state.toolMessages);
   } finally {
     stopProcessing();

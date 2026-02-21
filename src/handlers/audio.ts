@@ -109,6 +109,9 @@ export async function processAudioFile(
     const state = new StreamingState();
     const statusCallback = createStatusCallback(ctx, state);
 
+    // Send "Processing..." message before Claude call
+    const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
     // Send to Claude
     const claudeResponse = await session.sendMessageStreaming(
       prompt,
@@ -118,6 +121,11 @@ export async function processAudioFile(
       chatId,
       ctx
     );
+
+    // Delete processing message after response
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
 
     // Audit log
     await auditLog(userId, username, "AUDIO", transcript, claudeResponse);
@@ -130,7 +138,7 @@ export async function processAudioFile(
         await ctx.reply("🛑 Query stopped.");
       }
     } else {
-      await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
+      await ctx.reply("Something went wrong. Try again or /new for a fresh session.");
     }
   } finally {
     stopProcessing();

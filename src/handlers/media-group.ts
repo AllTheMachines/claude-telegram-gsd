@@ -200,6 +200,6 @@ export async function handleProcessingError(
       await ctx.reply("🛑 Query stopped.");
     }
   } else {
-    await ctx.reply(`❌ Error: ${errorStr.slice(0, 200)}`);
+    await ctx.reply("Something went wrong. Try again or /new for a fresh session.");
   }
 }

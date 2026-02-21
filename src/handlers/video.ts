@@ -127,6 +127,9 @@ export async function handleVideo(ctx: Context): Promise<void> {
     const state = new StreamingState();
     const statusCallback = createStatusCallback(ctx, state);
 
+    // Send "Processing..." message before Claude call
+    const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
     const response = await session.sendMessageStreaming(
       prompt,
       username,
@@ -135,6 +138,11 @@ export async function handleVideo(ctx: Context): Promise<void> {
       chatId,
       ctx
     );
+
+    // Delete processing message after response
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
 
     await auditLog(userId, username, "VIDEO", caption || "[video]", response);
 

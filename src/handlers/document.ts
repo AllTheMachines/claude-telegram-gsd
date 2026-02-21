@@ -306,6 +306,9 @@ async function processArchive(
     const state = new StreamingState();
     const statusCallback = createStatusCallback(ctx, state);
 
+    // Send "Processing..." message before Claude call
+    const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
     const response = await session.sendMessageStreaming(
       prompt,
       username,
@@ -314,6 +317,11 @@ async function processArchive(
       chatId,
       ctx
     );
+
+    // Delete processing message after response
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
 
     await auditLog(
       userId,
@@ -340,9 +348,7 @@ async function processArchive(
     } catch {
       // Ignore
     }
-    await ctx.reply(
-      `❌ Failed to process archive: ${String(error).slice(0, 100)}`
-    );
+    await ctx.reply("Something went wrong. Try again or /new for a fresh session.");
   } finally {
     stopProcessing();
     typing.stop();
@@ -395,6 +401,9 @@ async function processDocuments(
   const state = new StreamingState();
   const statusCallback = createStatusCallback(ctx, state);
 
+  // Send "Processing..." message before Claude call
+  const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
   try {
     const response = await session.sendMessageStreaming(
       prompt,
@@ -405,6 +414,11 @@ async function processDocuments(
       ctx
     );
 
+    // Delete processing message after response
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
+
     await auditLog(
       userId,
       username,
@@ -413,6 +427,10 @@ async function processDocuments(
       response
     );
   } catch (error) {
+    // Delete processing message before error reply
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
     await handleProcessingError(ctx, error, state.toolMessages);
   } finally {
     stopProcessing();

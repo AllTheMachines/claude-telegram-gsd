@@ -110,6 +110,9 @@ export async function handleVoice(ctx: Context): Promise<void> {
     const state = new StreamingState();
     const statusCallback = createStatusCallback(ctx, state);
 
+    // 10b. Send "Processing..." message before Claude call
+    const processingMsg = await ctx.reply("Processing...", { disable_notification: true });
+
     // 11. Send to Claude
     const claudeResponse = await session.sendMessageStreaming(
       transcript,
@@ -119,6 +122,11 @@ export async function handleVoice(ctx: Context): Promise<void> {
       chatId,
       ctx
     );
+
+    // Delete processing message after response
+    try {
+      await ctx.api.deleteMessage(chatId, processingMsg.message_id);
+    } catch { /* already deleted */ }
 
     // 12. Audit log
     await auditLog(userId, username, "VOICE", transcript, claudeResponse);
@@ -132,7 +140,7 @@ export async function handleVoice(ctx: Context): Promise<void> {
         await ctx.reply("🛑 Query stopped.");
       }
     } else {
-      await ctx.reply(`❌ Error: ${String(error).slice(0, 200)}`);
+      await ctx.reply("Something went wrong. Try again or /new for a fresh session.");
     }
   } finally {
     stopProcessing();
