@@ -21,6 +21,7 @@ import { execSync } from 'child_process';
 const VAULT_ROOT = 'D:/Obsidian/Ideas';
 
 const HIMALAYA_PATH = 'C:/Users/User/.local/bin/himalaya.exe';
+const EMAIL_FROM = 'theaterofdelays@gmail.com';
 const EMAIL_TO = 'ideas@randomstyles.net';
 
 // ============== Types ==============
@@ -398,16 +399,16 @@ function sendEmail(subject: string, body: string): boolean {
       }
     }
 
-    // Write body to a temp file to avoid shell quoting issues
-    const tmpPath = join(process.env['TEMP'] ?? 'C:/Windows/Temp', `autodoc-email-${Date.now()}.txt`);
-    writeFileSync(tmpPath, body, 'utf-8');
+    // Himalaya expects a raw RFC2822 message piped to stdin
+    const rawMessage = `From: ${EMAIL_FROM}\r\nTo: ${EMAIL_TO}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`;
 
-    // Send via himalaya: cat tempfile | himalaya message send --to <addr> --subject "<title>"
-    // Use stdin via shell redirection from temp file
-    const safeSubject = subject.replace(/"/g, '\\"');
+    // Write raw message to temp file, pipe to himalaya
+    const tmpPath = join(process.env['TEMP'] ?? 'C:/Windows/Temp', `autodoc-email-${Date.now()}.txt`);
+    writeFileSync(tmpPath, rawMessage, 'utf-8');
+
     const safeTmpPath = tmpPath.replace(/\\/g, '/');
     execSync(
-      `"${himalayaCmd}" message send --to "${EMAIL_TO}" --subject "${safeSubject}" < "${safeTmpPath}"`,
+      `"${himalayaCmd}" message send < "${safeTmpPath}"`,
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], shell: 'cmd.exe' }
     );
 
