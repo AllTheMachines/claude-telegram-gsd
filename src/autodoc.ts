@@ -35,6 +35,15 @@ export interface AutoDocResult {
   summary: string;      // 4-6 sentence summary of the document content
 }
 
+/** Format autodoc result as an HTML reply for Telegram */
+export function formatDocReply(doc: AutoDocResult, escapeHtml: (s: string) => string): string {
+  return [
+    `📄 <b>${escapeHtml(doc.title)}</b>`,
+    `📂 <code>${escapeHtml(doc.vaultPath)}</code>`,
+    doc.emailSent ? '✉️ Email sent' : '',
+  ].filter(Boolean).join('\n');
+}
+
 interface CategoryEntry {
   folder: string;
   index: string | null;

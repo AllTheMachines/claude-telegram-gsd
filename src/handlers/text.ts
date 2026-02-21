@@ -13,7 +13,7 @@ import {
   startTypingIndicator,
 } from "../utils";
 import { StreamingState, createStatusCallback } from "./streaming";
-import { autoDocument } from "../autodoc";
+import { autoDocument, formatDocReply } from "../autodoc";
 import { escapeHtml } from "../formatting";
 
 /**
@@ -115,17 +115,7 @@ export async function handleText(ctx: Context): Promise<void> {
         try {
           const docResult = await autoDocument(message, response);
           if (docResult) {
-            const docLines = [
-              `<b>${escapeHtml(docResult.title)}</b>`,
-              '',
-              escapeHtml(docResult.summary),
-              '',
-              `<b>Saved:</b> <code>${escapeHtml(docResult.vaultPath)}</code>`,
-              `<b>Tags:</b> ${docResult.tags.map(t => `#${t}`).join(' ')}`,
-              docResult.emailSent ? 'Email sent to ideas@randomstyles.net' : '',
-            ].filter(Boolean).join('\n');
-
-            await ctx.reply(docLines, {
+            await ctx.reply(formatDocReply(docResult, escapeHtml), {
               parse_mode: 'HTML',
               disable_notification: true,
             });
